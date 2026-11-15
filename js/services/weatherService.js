@@ -4,7 +4,13 @@ import { fetchJson } from '../utils/httpClient.js';
 const roundCoord = (val) => Number(val).toFixed(3);
 
 export async function searchLocations(query, signal = null) {
-  const url = `${CONFIG.ENDPOINTS.OPEN_METEO_GEOCODING}?name=${encodeURIComponent(query)}&count=6&language=es`;
+  const params = new URLSearchParams({
+    name: query,
+    count: '6',
+    language: 'es'
+  });
+
+  const url = `${CONFIG.ENDPOINTS.OPEN_METEO_GEOCODING}?${params.toString()}`;
   const { data } = await fetchJson(url, {
     ttlMs: CONFIG.CACHE_TTL.GEOCODING_MS,
     signal
@@ -18,14 +24,22 @@ export async function searchLocations(query, signal = null) {
 }
 
 export async function fetchWeatherForecast(lat, lon, signal = null) {
-  const keyParam = CONFIG.OPEN_METEO_KEY ? `&apikey=${CONFIG.OPEN_METEO_KEY}` : '';
-  const url =
-    `${CONFIG.ENDPOINTS.OPEN_METEO_FORECAST}?latitude=${roundCoord(lat)}&longitude=${roundCoord(lon)}` +
-    `&timezone=auto&forecast_days=7&wind_speed_unit=kmh${keyParam}` +
-    `¤t=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,wind_direction_10m,shortwave_radiation` +
-    `&hourly=soil_moisture_3_to_9cm` +
-    `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,et0_fao_evapotranspiration,wind_speed_10m_max,shortwave_radiation_sum`;
+  const params = new URLSearchParams({
+    latitude: roundCoord(lat),
+    longitude: roundCoord(lon),
+    timezone: 'auto',
+    forecast_days: '7',
+    wind_speed_unit: 'kmh',
+    current: 'temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,wind_direction_10m,shortwave_radiation',
+    hourly: 'soil_moisture_3_to_9cm',
+    daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum,et0_fao_evapotranspiration,wind_speed_10m_max,shortwave_radiation_sum'
+  });
 
+  if (CONFIG.OPEN_METEO_KEY) {
+    params.set('apikey', CONFIG.OPEN_METEO_KEY);
+  }
+
+  const url = `${CONFIG.ENDPOINTS.OPEN_METEO_FORECAST}?${params.toString()}`;
   const { data, fromCache } = await fetchJson(url, {
     ttlMs: CONFIG.CACHE_TTL.FORECAST_MS,
     signal
@@ -46,7 +60,7 @@ export async function fetchWeatherForecast(lat, lon, signal = null) {
     fromCache,
     fetchedAt: new Date(),
     obsTime: current.time || null,
-    soilMoisture, // m³/m³ volumétrico (3–9 cm)
+    soilMoisture,
     current: {
       temp: current.temperature_2m,
       rh: current.relative_humidity_2m,
@@ -68,18 +82,23 @@ export async function fetchWeatherForecast(lat, lon, signal = null) {
 }
 
 export async function fetchNasaClimatology(lat, lon, signal = null) {
-  const url =
-    `${CONFIG.ENDPOINTS.NASA_POWER_CLIMATOLOGY}?parameters=T2M,PRECTOTCORR&community=AG` +
-    `&latitude=${roundCoord(lat)}&longitude=${roundCoord(lon)}&format=JSON`;
+  const params = new URLSearchParams({
+    parameters: 'T2M,PRECTOTCORR',
+    community: 'AG',
+    latitude: roundCoord(lat),
+    longitude: roundCoord(lon),
+    format: 'JSON'
+  });
 
+  const url = `${CONFIG.ENDPOINTS.NASA_POWER_CLIMATOLOGY}?${params.toString()}`;
   const { data, fromCache } = await fetchJson(url, {
     ttlMs: CONFIG.CACHE_TTL.CLIMATOLOGY_MS,
     signal
   });
 
-  const params = data?.properties?.parameter || {};
+  const p = data?.properties?.parameter || {};
   const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  const extract = (key) => months.map((m) => (params[key]?.[m] === -999 ? null : params[key]?.[m] ?? null));
+  const extract = (key) => months.map((m) => (paramsValue(p[key]?.[m])));
 
   return {
     source: 'NASA POWER (Climatología multianual)',
@@ -88,4 +107,8 @@ export async function fetchNasaClimatology(lat, lon, signal = null) {
     t2m: extract('T2M'),
     rain: extract('PRECTOTCORR')
   };
+}
+
+function paramsValue(val) {
+  return val === -999 || val === undefined ? null : val;
 }
