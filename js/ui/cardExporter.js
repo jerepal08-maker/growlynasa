@@ -86,13 +86,13 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
 
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 20px system-ui, -apple-system, sans-serif';
-  ctx.fillText('🌱 AgroVision · Crop Technical Card', 48, 62);
+  ctx.fillText(isEn ? '🌱 AgroVision · Crop Technical Card' : '🌱 AgroVision · Ficha Técnica de Cultivo', 48, 62);
 
   ctx.fillStyle = '#d9ecd9';
   ctx.font = '14px system-ui, -apple-system, sans-serif';
   const dateStr = new Date().toLocaleDateString(isEn ? 'en-US' : 'es-AR');
   ctx.fillText(
-    `📍 ${loc.name} (${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)})  ·  ${isEn ? 'Profile' : 'Perfil'}: ${profile.plotName}  ·  ${dateStr}`,
+    `📍 ${loc.name} (${Number(loc.lat).toFixed(3)}, ${Number(loc.lon).toFixed(3)})  ·  ${isEn ? 'Profile' : 'Perfil'}: ${profile?.plotName || ''}  ·  ${dateStr}`,
     48,
     92
   );
@@ -100,24 +100,24 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
   // Título del cultivo + Score
   const cropTitle = `${crop.i} ${getCropName(crop)}`;
   ctx.fillStyle = '#1f261e';
-  ctx.font = 'bold 30px system-ui, -apple-system, sans-serif';
+  ctx.font = 'bold 28px system-ui, -apple-system, sans-serif';
   ctx.fillText(cropTitle, 48, 178);
 
   ctx.fillStyle = '#5b6659';
-  ctx.font = 'italic 16px system-ui, -apple-system, sans-serif';
+  ctx.font = 'italic 15px system-ui, -apple-system, sans-serif';
   const titleWidth = ctx.measureText(cropTitle).width;
   ctx.fillText(`(${crop.scientific}) · ${crop.family}`, 60 + titleWidth, 178);
 
   // Pill de puntaje
   const sc = scoreColor(evalRes.score);
   const badgeText = `${evalRes.score}/100 · ${evalRes.classification.label}`;
-  ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
-  const badgeW = ctx.measureText(badgeText).width + 32;
-  roundRect(ctx, W - 48 - badgeW, 148, badgeW, 38, 19);
+  ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+  const badgeW = ctx.measureText(badgeText).width + 30;
+  roundRect(ctx, W - 48 - badgeW, 149, badgeW, 36, 18);
   ctx.fillStyle = sc.bg;
   ctx.fill();
   ctx.fillStyle = sc.fg;
-  ctx.fillText(badgeText, W - 32 - badgeW, 172);
+  ctx.fillText(badgeText, W - 33 - badgeW, 172);
 
   // Barra de progreso
   roundRect(ctx, 48, 196, W - 96, 10, 5);
@@ -126,6 +126,10 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
   roundRect(ctx, 48, 196, Math.max(12, ((W - 96) * evalRes.score) / 100), 10, 5);
   ctx.fillStyle = sc.bar;
   ctx.fill();
+
+  const waterLabel = isEn
+    ? ({ alta: 'high', media: 'medium', baja: 'low' }[crop.water] || crop.water)
+    : crop.water;
 
   // 4 Cajas de parámetros clave
   const boxW = (W - 96 - 36) / 4;
@@ -138,7 +142,7 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
     {
       lbl: isEn ? 'WATER REQUIREMENT' : 'REQUERIMIENTO HÍDRICO',
       val: `~${crop.seasonalRainMinMm} mm`,
-      sub: `Kc base: ${crop.kc} · ${isEn ? 'Demand' : 'Demanda'}: ${crop.water}`
+      sub: `Kc: ${crop.kc} · ${isEn ? 'Need' : 'Demanda'}: ${waterLabel}`
     },
     {
       lbl: isEn ? 'IDEAL SOIL TEXTURE' : 'TEXTURA IDEAL SUELO',
@@ -148,7 +152,7 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
     {
       lbl: 'USDA AMS MARKET DEMAND',
       val: evalRes.marketProfile ? `${evalRes.marketProfile.demandIndex}/100` : 'N/A',
-      sub: evalRes.marketProfile ? evalRes.marketProfile.amsCategory : 'ams.usda.gov'
+      sub: crop.amsCategory || evalRes.marketProfile?.amsCommodity || 'ams.usda.gov'
     }
   ];
 
@@ -163,15 +167,15 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
 
     ctx.fillStyle = '#5b6659';
     ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
-    ctx.fillText(b.lbl, bx + 12, 245);
+    ctx.fillText(String(b.lbl || ''), bx + 12, 245);
 
     ctx.fillStyle = '#1f4d2b';
-    ctx.font = 'bold 18px system-ui, -apple-system, sans-serif';
-    ctx.fillText(b.val, bx + 12, 272);
+    ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
+    ctx.fillText(String(b.val || '').slice(0, 22), bx + 12, 272);
 
     ctx.fillStyle = '#5b6659';
     ctx.font = '12px system-ui, -apple-system, sans-serif';
-    ctx.fillText(b.sub.slice(0, 30), bx + 12, 294);
+    ctx.fillText(String(b.sub || '').slice(0, 30), bx + 12, 294);
   });
 
   // Mini Calendario Anual S / G / H
@@ -203,7 +207,11 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
   ctx.fillStyle = '#2c352b';
   ctx.font = '12.5px system-ui, -apple-system, sans-serif';
   let yAdv = 412;
-  (evalRes.advantages.slice(0, 3).length ? evalRes.advantages.slice(0, 3) : [isEn ? 'Balanced profile across evaluated criteria.' : 'Perfil equilibrado en los criterios evaluados.']).forEach((item) => {
+  const advList = evalRes.advantages.slice(0, 3).length
+    ? evalRes.advantages.slice(0, 3)
+    : [isEn ? 'Balanced profile across evaluated criteria.' : 'Perfil equilibrado en los criterios evaluados.'];
+
+  advList.forEach((item) => {
     const lines = wrapLines(ctx, `• ${item}`, colW);
     lines.slice(0, 2).forEach((ln) => {
       ctx.fillText(ln, 48, yAdv);
@@ -242,10 +250,10 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
 
   ctx.fillStyle = '#1f4d2b';
   ctx.font = 'bold 13.5px system-ui, -apple-system, sans-serif';
-  ctx.fillText(`${isEn ? '💧 7-Day Irrigation:' : '💧 Riego 7 días:'} ${irrRes.t}`, 62, 539);
+  ctx.fillText(`${isEn ? '💧 7-Day Irrigation:' : '💧 Riego 7 días:'} ${irrRes?.t || ''}`, 62, 539);
   ctx.fillStyle = '#4a5548';
   ctx.font = '12.5px system-ui, -apple-system, sans-serif';
-  ctx.fillText(`${irrRes.why[0]}  ${irrRes.why[1]}`, 62, 559);
+  ctx.fillText(`${irrRes?.why?.[0] || ''}  ${irrRes?.why?.[1] || ''}`, 62, 559);
 
   // Pie de tarjeta
   ctx.fillStyle = '#6c776a';
@@ -256,7 +264,7 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
     H - 36
   );
 
-  const safeLoc = loc.name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 24);
+  const safeLoc = String(loc.name || 'location').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 24);
   triggerPngDownload(canvas, `AgroVision_${crop.id}_${safeLoc}.png`);
 }
 
@@ -305,7 +313,7 @@ export function downloadSummaryCardPng({ loc, wx, nasaDaily, topo, profile, agro
   ctx.fillStyle = '#d9ecd9';
   ctx.font = '14px system-ui, -apple-system, sans-serif';
   ctx.fillText(
-    `📍 ${loc.name} (${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)})  ·  ⛰️ ${topo?.elevationMeters ?? '—'} m  ·  ${dateStr}`,
+    `📍 ${loc.name} (${Number(loc.lat).toFixed(3)}, ${Number(loc.lon).toFixed(3)})  ·  ⛰️ ${topo?.elevationMeters ?? '—'} m  ·  ${dateStr}`,
     48,
     94
   );
@@ -389,11 +397,11 @@ export function downloadSummaryCardPng({ loc, wx, nasaDaily, topo, profile, agro
   ctx.fillStyle = '#6c776a';
   ctx.font = '11.5px system-ui, -apple-system, sans-serif';
   ctx.fillText(
-    `AgroVision · Active Soil Profile: ${profile.plotName} (${profile.completenessPct}%) · Sources: Open-Meteo, NASA POWER, SoilGrids, USDA AMS`,
+    `AgroVision · Active Soil Profile: ${profile?.plotName || ''} (${profile?.completenessPct ?? 0}%) · Sources: Open-Meteo, NASA POWER, SoilGrids, USDA AMS`,
     48,
     H - 36
   );
 
-  const safeLoc = loc.name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 24);
+  const safeLoc = String(loc.name || 'location').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 24);
   triggerPngDownload(canvas, `AgroVision_Summary_${safeLoc}.png`);
 }
