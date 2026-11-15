@@ -1,5 +1,6 @@
 import { CONFIG } from '../config.js';
 import { fetchJson } from '../utils/httpClient.js';
+import { getLang } from '../i18n/translations.js';
 
 const roundCoord = (val) => Number(val).toFixed(3);
 
@@ -7,7 +8,7 @@ export async function searchLocations(query, signal = null) {
   const params = new URLSearchParams({
     name: query,
     count: '6',
-    language: 'es'
+    language: getLang()
   });
 
   const url = `${CONFIG.ENDPOINTS.OPEN_METEO_GEOCODING}?${params.toString()}`;
@@ -55,7 +56,7 @@ export async function fetchWeatherForecast(lat, lon, signal = null) {
   }
 
   return {
-    source: 'Open-Meteo (Pronóstico)',
+    source: 'Open-Meteo (Forecast)',
     isEstimated: false,
     fromCache,
     fetchedAt: new Date(),
@@ -98,10 +99,10 @@ export async function fetchNasaClimatology(lat, lon, signal = null) {
 
   const p = data?.properties?.parameter || {};
   const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  const extract = (key) => months.map((m) => (paramsValue(p[key]?.[m])));
+  const extract = (key) => months.map((m) => paramsValue(p[key]?.[m]));
 
   return {
-    source: 'NASA POWER (Climatología multianual)',
+    source: 'NASA POWER (Climatology)',
     isHistorical: true,
     fromCache,
     t2m: extract('T2M'),
