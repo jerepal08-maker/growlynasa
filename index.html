@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AgroGuía</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
   <link rel="stylesheet" href="./css/styles.css">
 </head>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
 <body>
   <nav>
     <div class="brand">🌱 AgroGuía</div>
@@ -15,7 +15,7 @@
     <button data-s="loc">📍 Ubicación</button>
     <button data-s="crops">🌾 ¿Qué plantar?</button>
     <button data-s="cal">📅 Calendario</button>
-    <button data-s="plots">🧑‍🌾 Mi terreno</button>
+    <button data-s="plots">🧪 Suelo y Lote</button>
     <button data-s="irr">💧 Riego</button>
     <button data-s="alerts">⚠️ Alertas</button>
     <small id="where"></small>
@@ -32,10 +32,10 @@
     </section>
 
     <section id="loc">
-      <h2>Ubicación</h2>
+      <h2>Ubicación geográfica</h2>
       <div class="card">
         <div class="row">
-          <input id="q" placeholder="Buscar localidad…">
+          <input id="q" placeholder="Buscar localidad o región…">
           <button id="qb">Buscar</button>
           <button id="gps">Usar mi ubicación</button>
           <select id="prov"></select>
@@ -48,7 +48,7 @@
         </div>
       </div>
       <div id="map"></div>
-      <p class="note">Hacé clic en el mapa para elegir un punto.</p>
+      <p class="note">Hacé clic en el mapa para elegir el punto exacto de análisis.</p>
     </section>
 
     <section id="crops">
@@ -65,30 +65,75 @@
     </section>
 
     <section id="plots">
-      <h2>Mi terreno</h2>
+      <h2>Características del terreno y suelo</h2>
+      <div class="info-banner">
+        <div>
+          <strong>📍 Ubicación vinculada:</strong> <span id="plotActiveLoc">San Luis, Argentina</span>
+          <div class="note">Todos los campos abajo son opcionales. Si no conocés un dato, usaremos estimaciones satelitales o evaluaremos con las variables disponibles.</div>
+        </div>
+        <button type="button" class="secondary" id="btnChangeLoc">Cambiar en mapa</button>
+      </div>
+
       <div class="card">
         <form id="pf" class="grid">
-          <input name="name" placeholder="Nombre" required>
-          <input name="place" placeholder="Ubicación">
-          <input name="area" type="number" step="any" placeholder="Superficie (ha)">
-          <select name="soil">
-            <option>franco</option>
-            <option>franco-arenoso</option>
-            <option>arenoso</option>
-            <option>arcilloso</option>
-          </select>
-          <input name="ph" type="number" step="0.1" placeholder="pH">
-          <input name="om" type="number" step="0.1" placeholder="Materia orgánica %">
-          <input name="moist" type="number" step="any" placeholder="Humedad suelo %">
-          <select name="water">
-            <option value="riego">Con riego</option>
-            <option value="secano">Solo lluvia</option>
-            <option value="escasa">Agua escasa</option>
-          </select>
-          <input name="prev" placeholder="Cultivos anteriores">
-          <button>Guardar</button>
+          <div class="field-group">
+            <label>Identificador del lote <span class="opt-tag">(opcional)</span></label>
+            <input name="name" placeholder="Ej: Lote Norte (auto si vacío)">
+          </div>
+
+          <div class="field-group">
+            <label>Superficie (ha) <span class="opt-tag">(opcional)</span></label>
+            <input name="area" type="number" step="any" min="0" placeholder="Ej: 25">
+          </div>
+
+          <div class="field-group">
+            <label>Textura del suelo <span class="opt-tag">(opcional)</span></label>
+            <select name="soil">
+              <option value="">No lo sé (auto-estimar)</option>
+              <option value="franco">Franco</option>
+              <option value="franco-arenoso">Franco-arenoso</option>
+              <option value="arenoso">Arenoso</option>
+              <option value="arcilloso">Arcilloso</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label>pH del suelo <span class="opt-tag">(opcional)</span></label>
+            <input name="ph" type="number" step="0.1" min="3" max="11" placeholder="Ej: 6.5">
+          </div>
+
+          <div class="field-group">
+            <label>Materia orgánica (%) <span class="opt-tag">(opcional)</span></label>
+            <input name="om" type="number" step="0.1" min="0" max="100" placeholder="Ej: 2.8">
+          </div>
+
+          <div class="field-group">
+            <label>Humedad del suelo (%) <span class="opt-tag">(opcional)</span></label>
+            <input name="moist" type="number" step="any" min="0" max="100" placeholder="Ej: 22">
+          </div>
+
+          <div class="field-group">
+            <label>Disponibilidad hídrica <span class="opt-tag">(opcional)</span></label>
+            <select name="water">
+              <option value="">No especificado</option>
+              <option value="riego">Con riego</option>
+              <option value="secano">Solo lluvia (secano)</option>
+              <option value="escasa">Agua escasa</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label>Cultivos anteriores <span class="opt-tag">(opcional)</span></label>
+            <input name="prev" placeholder="Ej: Maíz, Soja">
+          </div>
+
+          <div class="field-group" style="justify-content: flex-end;">
+            <button type="submit">Guardar configuración</button>
+          </div>
         </form>
       </div>
+
+      <div id="effectiveSoilSummary"></div>
       <div id="plotList" class="grid"></div>
     </section>
 
@@ -112,7 +157,7 @@
     </section>
 
     <footer>
-      Datos: Open-Meteo · NASA POWER · OpenStreetMap. Información orientativa; no garantiza rendimientos.
+      Datos: Open-Meteo (ERA5/SRTM) · NASA POWER (GPM/SMAP) · ISRIC SoilGrids · USDA · OpenStreetMap. Información orientativa; no garantiza rendimientos.
     </footer>
   </main>
 
