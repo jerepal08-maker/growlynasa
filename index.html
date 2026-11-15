@@ -1,19 +1,23 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AgroGuía</title>
+  <title>AgroGuía · Agricultural Intelligence</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
-  <link rel="stylesheet" href="./css/styles.css?v=2">
+  <link rel="stylesheet" href="./css/styles.css?v=3">
 </head>
 <body>
   <nav>
     <div class="brand">🌱 AgroGuía</div>
-    <button data-s="dash" class="on">📊 Panel Unificado</button>
-    <button data-s="loc">📍 Ubicación y Mapa</button>
-    <button data-s="plots">🧪 Suelo y Lote</button>
+    <div class="lang-switch" role="group" aria-label="Language selector">
+      <button type="button" data-lang="en" class="on">🌐 EN</button>
+      <button type="button" data-lang="es">ES</button>
+    </div>
+    <button data-s="dash" class="on" data-i18n="navDash">📊 Unified Dashboard</button>
+    <button data-s="loc" data-i18n="navLoc">📍 Location & Map</button>
+    <button data-s="plots" data-i18n="navPlots">🧪 Soil & Plot</button>
     <small id="where"></small>
   </nav>
 
@@ -22,18 +26,18 @@
       <div class="hero">
         <div>
           <h1>🌱 AgroGuía</h1>
-          <p>Plataforma unificada de inteligencia agroclimática, satelital y edáfica.</p>
+          <p data-i18n="heroSubtitle">Unified agroclimatic, satellite, and soil intelligence platform.</p>
         </div>
         <div class="row" style="margin:0">
-          <button type="button" class="secondary" id="heroChangeLoc">📍 Cambiar ubicación</button>
-          <button type="button" class="secondary" id="heroEditSoil">🧪 Configurar suelo</button>
+          <button type="button" class="secondary" id="heroChangeLoc" data-i18n="heroChangeLoc">📍 Change location</button>
+          <button type="button" class="secondary" id="heroEditSoil" data-i18n="heroEditSoil">🧪 Configure soil</button>
         </div>
       </div>
 
-      <div class="quick-nav" role="navigation" aria-label="Navegación rápida del panel">
-        <a href="#blk-alerts">⚠️ Alertas y Clima</a>
-        <a href="#blk-gauss">📈 Curvas de Gauss y Clima Anual</a>
-        <a href="#blk-crops">🌾 Cultivos, Calendario y Riego</a>
+      <div class="quick-nav" role="navigation" aria-label="Quick dashboard navigation">
+        <a href="#blk-alerts" data-i18n="quickAlerts">⚠️ Alerts & Climate</a>
+        <a href="#blk-gauss" data-i18n="quickGauss">📈 Gaussian Curves & Annual Climate</a>
+        <a href="#blk-crops" data-i18n="quickCrops">🌾 Crops, Calendar & Irrigation</a>
       </div>
 
       <div id="status"></div>
@@ -41,90 +45,90 @@
     </section>
 
     <section id="loc">
-      <h2>Ubicación geográfica</h2>
+      <h2 data-i18n="locTitle">Geographic Location</h2>
       <div class="card">
         <div class="row">
-          <input id="q" placeholder="Buscar localidad o región…">
-          <button id="qb">Buscar</button>
-          <button id="gps">Usar mi ubicación</button>
+          <input id="q" data-i18n-placeholder="searchPlaceholder" placeholder="Search city, town, or region…">
+          <button id="qb" data-i18n="btnSearch">Search</button>
+          <button id="gps" data-i18n="btnGps">Use my location</button>
           <select id="prov"></select>
         </div>
         <div id="res"></div>
         <div class="row">
           <label>Lat <input id="lat" size="9"></label>
           <label>Lon <input id="lon" size="9"></label>
-          <button id="go">Consultar</button>
+          <button id="go" data-i18n="btnConsult">Analyze</button>
         </div>
       </div>
       <div id="map"></div>
-      <p class="note">Hacé clic en el mapa para elegir el punto exacto de análisis.</p>
+      <p class="note" data-i18n="mapHint">Click anywhere on the map to select the exact analysis point.</p>
     </section>
 
     <section id="plots">
-      <h2>Características del terreno y suelo</h2>
+      <h2 data-i18n="plotsTitle">Terrain & Soil Characteristics</h2>
       <div class="info-banner">
         <div>
-          <strong>📍 Ubicación vinculada:</strong> <span id="plotActiveLoc">San Luis, Argentina</span>
-          <div class="note">Todos los campos abajo son opcionales. Si no conocés un dato, usaremos estimaciones satelitales o evaluaremos con las variables disponibles.</div>
+          <strong data-i18n="linkedLocation">📍 Linked location:</strong> <span id="plotActiveLoc">San Luis, Argentina</span>
+          <div class="note" data-i18n="plotsIntro">All fields below are optional. If a parameter is unknown, satellite estimates will be used or crops will be evaluated with available variables.</div>
         </div>
-        <button type="button" class="secondary" id="btnChangeLoc">Cambiar en mapa</button>
+        <button type="button" class="secondary" id="btnChangeLoc" data-i18n="btnChangeOnMap">Change on map</button>
       </div>
 
       <div class="card">
         <form id="pf" class="grid">
           <div class="field-group">
-            <label>Identificador del lote <span class="opt-tag">(opcional)</span></label>
-            <input name="name" placeholder="Ej: Lote Norte (auto si vacío)">
+            <label><span data-i18n="lblPlotName">Plot identifier</span> <span class="opt-tag" data-i18n="optTag">(optional)</span></label>
+            <input name="name" data-i18n-placeholder="phPlotName" placeholder="e.g., North Field (auto if empty)">
           </div>
 
           <div class="field-group">
-            <label>Superficie (ha) <span class="opt-tag">(opcional)</span></label>
-            <input name="area" type="number" step="any" min="0" placeholder="Ej: 25">
+            <label><span data-i18n="lblArea">Area (ha)</span> <span class="opt-tag" data-i18n="optTag">(optional)</span></label>
+            <input name="area" type="number" step="any" min="0" data-i18n-placeholder="phArea" placeholder="e.g., 25">
           </div>
 
           <div class="field-group">
-            <label>Textura del suelo <span class="opt-tag">(opcional)</span></label>
+            <label><span data-i18n="lblSoilTex">Soil texture</span> <span class="opt-tag" data-i18n="optTag">(optional)</span></label>
             <select name="soil">
-              <option value="">No lo sé (auto-estimar)</option>
-              <option value="franco">Franco</option>
-              <option value="franco-arenoso">Franco-arenoso</option>
-              <option value="arenoso">Arenoso</option>
-              <option value="arcilloso">Arcilloso</option>
+              <option value="" data-i18n="optUnknownSoil">Unknown (auto-estimate)</option>
+              <option value="franco" data-i18n="texLoam">Loam</option>
+              <option value="franco-arenoso" data-i18n="texSandyLoam">Sandy loam</option>
+              <option value="arenoso" data-i18n="texSandy">Sandy</option>
+              <option value="arcilloso" data-i18n="texClay">Clay</option>
             </select>
           </div>
 
           <div class="field-group">
-            <label>pH del suelo <span class="opt-tag">(opcional)</span></label>
-            <input name="ph" type="number" step="0.1" min="3" max="11" placeholder="Ej: 6.5">
+            <label><span data-i18n="lblPh">Soil pH</span> <span class="opt-tag" data-i18n="optTag">(optional)</span></label>
+            <input name="ph" type="number" step="0.1" min="3" max="11" data-i18n-placeholder="phPh" placeholder="e.g., 6.5">
           </div>
 
           <div class="field-group">
-            <label>Materia orgánica (%) <span class="opt-tag">(opcional)</span></label>
-            <input name="om" type="number" step="0.1" min="0" max="100" placeholder="Ej: 2.8">
+            <label><span data-i18n="lblOm">Organic matter (%)</span> <span class="opt-tag" data-i18n="optTag">(optional)</span></label>
+            <input name="om" type="number" step="0.1" min="0" max="100" data-i18n-placeholder="phOm" placeholder="e.g., 2.8">
           </div>
 
           <div class="field-group">
-            <label>Humedad del suelo (%) <span class="opt-tag">(opcional)</span></label>
-            <input name="moist" type="number" step="any" min="0" max="100" placeholder="Ej: 22">
+            <label><span data-i18n="lblMoist">Soil moisture (%)</span> <span class="opt-tag" data-i18n="optTag">(optional)</span></label>
+            <input name="moist" type="number" step="any" min="0" max="100" data-i18n-placeholder="phMoist" placeholder="e.g., 22">
           </div>
 
           <div class="field-group">
-            <label>Disponibilidad hídrica <span class="opt-tag">(opcional)</span></label>
+            <label><span data-i18n="lblWater">Water availability</span> <span class="opt-tag" data-i18n="optTag">(optional)</span></label>
             <select name="water">
-              <option value="">No especificado</option>
-              <option value="riego">Con riego</option>
-              <option value="secano">Solo lluvia (secano)</option>
-              <option value="escasa">Agua escasa</option>
+              <option value="" data-i18n="optUnspecified">Not specified</option>
+              <option value="riego" data-i18n="waterIrrigated">Irrigated</option>
+              <option value="secano" data-i18n="waterRainfed">Rainfed (rain only)</option>
+              <option value="escasa" data-i18n="waterScarce">Scarce water</option>
             </select>
           </div>
 
           <div class="field-group">
-            <label>Cultivos anteriores <span class="opt-tag">(opcional)</span></label>
-            <input name="prev" placeholder="Ej: Maíz, Soja">
+            <label><span data-i18n="lblPrevCrops">Previous crops</span> <span class="opt-tag" data-i18n="optTag">(optional)</span></label>
+            <input name="prev" data-i18n-placeholder="phPrevCrops" placeholder="e.g., Corn, Soybean">
           </div>
 
           <div class="field-group" style="justify-content: flex-end;">
-            <button type="submit">Guardar configuración</button>
+            <button type="submit" data-i18n="btnSavePlot">Save configuration</button>
           </div>
         </form>
       </div>
@@ -133,8 +137,8 @@
       <div id="plotList" class="grid"></div>
     </section>
 
-    <footer>
-      Datos: Open-Meteo (Forecast / Copernicus ERA5 / NASA SRTM) · NASA POWER (GPM / SMAP) · ISRIC SoilGrids · USDA · OpenStreetMap. Información orientativa; no garantiza rendimientos.
+    <footer data-i18n="footerText">
+      Data: Open-Meteo (Forecast / Copernicus ERA5 / NASA SRTM) · NASA POWER (GPM / SMAP) · ISRIC SoilGrids · USDA · OpenStreetMap. Advisory information only; yields are not guaranteed.
     </footer>
   </main>
 
