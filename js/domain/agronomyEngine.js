@@ -13,13 +13,13 @@ export function getCropSowMonths(crop, lat) {
 }
 
 export function buildComprehensiveContext({
-  lat, wx, era5, nasaDaily, topo, profile, ecostress, faoGaez, agroPhysics
+  lat, wx, era5, nasaDaily, topo, profile, ecostress, faoGaez, agroPhysics, marketDemand
 }) {
   return {
     lat: Number(lat),
     hemisphere: Number(lat) >= 0 ? 'north' : 'south',
     month: new Date().getMonth() + 1,
-    wx, era5, nasaDaily, topo, profile, ecostress, faoGaez, agroPhysics
+    wx, era5, nasaDaily, topo, profile, ecostress, faoGaez, agroPhysics, marketDemand
   };
 }
 
@@ -248,7 +248,7 @@ export function evaluateCropComprehensive(crop, ctx) {
     const idealList = crop.soil.map((s) => translateTexture(s)).join(', ');
     registerCriterion({
       id: 'soilTexture', pillar: 'Soil', label: lblTex, weight: 8, score: isIdeal ? 100 : 50,
-      detail: isEn ? `${translateTexture(texture)} (ideal: ${idealList})` : `${translateTexture(texture)} (ideal: ${idealList})`
+      detail: `${translateTexture(texture)} (ideal: ${idealList})`
     });
   } else {
     registerCriterion({ label: lblTex, score: null });
@@ -282,19 +282,19 @@ export function evaluateCropComprehensive(crop, ctx) {
     registerCriterion({ label: lblOm, score: null });
   }
 
-  // 11. Estacionalidad y ciclo (6%)
+  // 11. Estacionalidad y ciclo (5%)
   const nearSow = sowMonths.some((s) => [1, 11].includes(Math.abs(s - ctx.month)));
   const sowScore = sowMonths.includes(ctx.month) ? 100 : nearSow ? 65 : 30;
   registerCriterion({
     id: 'seasonality', pillar: 'Environment',
     label: isEn ? 'Seasonality & cycle' : 'Estacionalidad y ciclo',
-    weight: 6, score: sowScore,
+    weight: 5, score: sowScore,
     detail: isEn
       ? `${ctx.hemisphere === 'north' ? 'Northern' : 'Southern'} hemisphere sowing months: ${sowMonths.join(', ')} (${crop.cycle} d cycle)`
       : `Siembra hemisferio ${ctx.hemisphere === 'north' ? 'norte' : 'sur'}: meses ${sowMonths.join(', ')} (ciclo ${crop.cycle} d)`
   });
 
-  // 12. Horas de luz / fotoperíodo (5%)
+  // 12. Horas de luz / fotoperíodo (4%)
   const currentLight = ctx.agroPhysics?.photoperiod?.currentDaylightHours ?? null;
   const lblLight = isEn ? 'Daylight hours / photoperiod' : 'Horas de luz / fotoperíodo';
   if (currentLight != null) {
@@ -302,7 +302,7 @@ export function evaluateCropComprehensive(crop, ctx) {
     const inRange = currentLight >= dMin && currentLight <= dMax;
     const lightScore = crop.photoperiodType === 'neutral' ? 95 : inRange ? 100 : 55;
     registerCriterion({
-      id: 'photoperiod', pillar: 'Environment', label: lblLight, weight: 5, score: lightScore,
+      id: 'photoperiod', pillar: 'Environment', label: lblLight, weight: 4, score: lightScore,
       detail: isEn
         ? `${currentLight} h daylight today (response: ${crop.photoperiodType}, range ${dMin}–${dMax} h)`
         : `${currentLight} h de luz hoy (respuesta: ${crop.photoperiodType}, rango ${dMin}–${dMax} h)`
@@ -311,7 +311,7 @@ export function evaluateCropComprehensive(crop, ctx) {
     registerCriterion({ label: lblLight, score: null });
   }
 
-  // 13. Altitud y pendiente (5%)
+  // 13. Altitud y pendiente (4%)
   const elev = ctx.topo?.elevationMeters ?? null;
   const slope = ctx.topo?.slopePercent ?? null;
   const lblTopo = isEn ? 'Altitude & slope (SRTM)' : 'Altitud y pendiente (SRTM)';
@@ -329,14 +329,14 @@ export function evaluateCropComprehensive(crop, ctx) {
       topoNotes.push(isEn ? `Slope ${slope}%` : `Pendiente ${slope}%`);
     }
     registerCriterion({
-      id: 'topography', pillar: 'Environment', label: lblTopo, weight: 5, score: topoScore,
+      id: 'topography', pillar: 'Environment', label: lblTopo, weight: 4, score: topoScore,
       detail: topoNotes.join(' · '), criticalCap: 35
     });
   } else {
     registerCriterion({ label: lblTopo, score: null });
   }
 
-  // 14. Rotación y aptitud agroecológica (4%)
+  // 14. Rotación y aptitud agroecológica (3%)
   const prevCropText = ctx.profile?.fields?.previousCrop?.value ?? null;
   const gaezCropScore = ctx.faoGaez?.available ? ctx.faoGaez.suitabilityByCrop?.[crop.id] : null;
   const lblRot = isEn ? 'Crop rotation & agroecological suitability' : 'Rotación y aptitud agroecológica';
@@ -354,11 +354,28 @@ export function evaluateCropComprehensive(crop, ctx) {
       rotNotes.push(`FAO GAEZ: ${gaezCropScore}/100`);
     }
     registerCriterion({
-      id: 'rotationGaez', pillar: 'Environment', label: lblRot, weight: 4, score: rotScore,
+      id: 'rotationGaez', pillar: 'Environment', label: lblRot, weight: 3, score: rotScore,
       detail: rotNotes.join(' · ')
     });
   } else {
     registerCriterion({ label: lblRot, score: null });
+  }
+
+  // 15. Demanda comercial de mercado USDA AMS Market News (4%)
+  const mktProfile = ctx.marketDemand?.byCrop?.[crop.id] || null;
+  const lblMarket = isEn ? 'USDA AMS Market Demand' : 'Demanda de Mercado USDA AMS';
+  if (mktProfile) {
+    const channelText = isEn ? mktProfile.channelEn : mktProfile.channelEs;
+    registerCriterion({
+      id: 'marketDemand',
+      pillar: 'Market',
+      label: lblMarket,
+      weight: 4,
+      score: mktProfile.demandIndex,
+      detail: `${mktProfile.demandIndex}/100 (${mktProfile.amsCommodity} · ${channelText})`
+    });
+  } else {
+    registerCriterion({ label: lblMarket, score: null });
   }
 
   const totalAvailableWeight = criteria.reduce((acc, c) => acc + c.weight, 0);
@@ -381,6 +398,7 @@ export function evaluateCropComprehensive(crop, ctx) {
     advantages,
     limitingFactors,
     missingVariables,
+    marketProfile: mktProfile,
     weightCoveragePct: Math.round((totalAvailableWeight / 100) * 100)
   };
 }
@@ -391,11 +409,42 @@ function evaluateRotationCompatibility(candidateCrop, prevText, isEn) {
     wheat: ['trigo', 'wheat'],
     corn: ['maiz', 'maíz', 'corn'],
     soybean: ['soja', 'soy'],
+    rice: ['arroz', 'rice'],
+    sugarcane: ['caña', 'cana', 'sugarcane'],
+    cassava: ['mandioca', 'yuca', 'cassava'],
+    coffee: ['cafe', 'café', 'coffee'],
+    cocoa: ['cacao', 'cocoa'],
+    banana: ['banano', 'banana', 'platano', 'plátano'],
+    oil_palm: ['palma', 'palm'],
+    grape: ['vid', 'uva', 'grape'],
+    olive: ['olivo', 'olive'],
+    citrus: ['citrico', 'cítrico', 'naranja', 'limon', 'citrus'],
+    apple: ['manzana', 'apple'],
+    millet: ['mijo', 'millet'],
     tomato: ['tomate', 'tomato'],
     lettuce: ['lechuga', 'lettuce'],
     potato: ['papa', 'patata', 'potato'],
     sunflower: ['girasol', 'sunflower'],
-    peanut: ['mani', 'maní', 'peanut']
+    peanut: ['mani', 'maní', 'peanut'],
+    barley: ['cebada', 'barley'],
+    oats: ['avena', 'oats'],
+    sorghum: ['sorgo', 'sorghum'],
+    rye: ['centeno', 'rye'],
+    alfalfa: ['alfalfa'],
+    chickpea: ['garbanzo', 'chickpea'],
+    lentil: ['lenteja', 'lentil'],
+    dry_bean: ['frijol', 'poroto', 'judia', 'bean'],
+    pea: ['arveja', 'guisante', 'pea'],
+    canola: ['canola', 'colza', 'rapeseed'],
+    cotton: ['algodon', 'algodón', 'cotton'],
+    sugar_beet: ['remolacha', 'sugar beet'],
+    onion: ['cebolla', 'onion'],
+    garlic: ['ajo', 'garlic'],
+    carrot: ['zanahoria', 'carrot'],
+    bell_pepper: ['pimiento', 'morron', 'pepper'],
+    squash: ['zapallo', 'calabaza', 'squash', 'pumpkin'],
+    spinach: ['espinaca', 'spinach'],
+    quinoa: ['quinua', 'quinoa', 'quínoa']
   };
 
   const aliases = sameCropAliases[candidateCrop.id] || [candidateCrop.n.toLowerCase()];
@@ -408,7 +457,7 @@ function evaluateRotationCompatibility(candidateCrop, prevText, isEn) {
     };
   }
 
-  const prevIsLegume = ['soja', 'soy', 'mani', 'maní', 'peanut', 'alfalfa', 'poroto'].some((l) => norm.includes(l));
+  const prevIsLegume = ['soja', 'soy', 'mani', 'maní', 'peanut', 'alfalfa', 'poroto', 'frijol', 'garbanzo', 'lenteja', 'arveja'].some((l) => norm.includes(l));
   if (prevIsLegume && candidateCrop.family === 'Poaceae') {
     return {
       score: 100,
