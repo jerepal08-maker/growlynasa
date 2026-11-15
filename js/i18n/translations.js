@@ -1,4 +1,5 @@
-const STORAGE_KEY = 'agroguia.lang';
+const STORAGE_KEY = 'agrovision.lang';
+const LEGACY_STORAGE_KEY = 'agroguia.lang';
 
 export const MONTH_NAMES_I18N = {
   en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
@@ -9,11 +10,42 @@ export const CROP_NAMES_I18N = {
   wheat: { en: 'Wheat', es: 'Trigo' },
   corn: { en: 'Corn (Maize)', es: 'Maíz' },
   soybean: { en: 'Soybean', es: 'Soja' },
+  rice: { en: 'Rice', es: 'Arroz' },
+  sugarcane: { en: 'Sugarcane', es: 'Caña de azúcar' },
+  cassava: { en: 'Cassava (Yuca)', es: 'Mandioca (Yuca)' },
+  coffee: { en: 'Coffee', es: 'Café' },
+  cocoa: { en: 'Cocoa', es: 'Cacao' },
+  banana: { en: 'Banana / Plantain', es: 'Banano / Plátano' },
+  oil_palm: { en: 'Oil Palm', es: 'Palma de aceite' },
+  grape: { en: 'Grape (Vine)', es: 'Vid (Uva)' },
+  olive: { en: 'Olive', es: 'Olivo' },
+  citrus: { en: 'Citrus (Oranges & Lemons)', es: 'Cítricos (Naranjas y Limones)' },
+  apple: { en: 'Apple', es: 'Manzana' },
+  millet: { en: 'Pearl Millet', es: 'Mijo' },
   tomato: { en: 'Tomato', es: 'Tomate' },
   lettuce: { en: 'Lettuce', es: 'Lechuga' },
-  potato: { en: 'Potato', es: 'Papa' },
+  potato: { en: 'Potato', es: 'Papa (Patata)' },
   sunflower: { en: 'Sunflower', es: 'Girasol' },
-  peanut: { en: 'Peanut', es: 'Maní' }
+  peanut: { en: 'Peanut', es: 'Maní' },
+  barley: { en: 'Barley', es: 'Cebada' },
+  oats: { en: 'Oats', es: 'Avena' },
+  sorghum: { en: 'Sorghum', es: 'Sorgo' },
+  rye: { en: 'Rye', es: 'Centeno' },
+  alfalfa: { en: 'Alfalfa', es: 'Alfalfa' },
+  chickpea: { en: 'Chickpea', es: 'Garbanzo' },
+  lentil: { en: 'Lentil', es: 'Lenteja' },
+  dry_bean: { en: 'Dry Bean', es: 'Frijol / Poroto seco' },
+  pea: { en: 'Field Pea', es: 'Arveja' },
+  canola: { en: 'Canola (Rapeseed)', es: 'Colza (Canola)' },
+  cotton: { en: 'Cotton', es: 'Algodón' },
+  sugar_beet: { en: 'Sugar Beet', es: 'Remolacha azucarera' },
+  onion: { en: 'Onion', es: 'Cebolla' },
+  garlic: { en: 'Garlic', es: 'Ajo' },
+  carrot: { en: 'Carrot', es: 'Zanahoria' },
+  bell_pepper: { en: 'Bell Pepper', es: 'Pimiento' },
+  squash: { en: 'Squash / Pumpkin', es: 'Zapallo / Calabaza' },
+  spinach: { en: 'Spinach', es: 'Espinaca' },
+  quinoa: { en: 'Quinoa', es: 'Quinua' }
 };
 
 const TEXTURE_I18N = {
@@ -31,16 +63,18 @@ const WATER_I18N = {
 
 const DICT = {
   en: {
-    appTitle: 'AgroGuía · Agricultural Intelligence',
+    appName: 'AgroVision',
+    appTitle: 'AgroVision · Agricultural Intelligence',
     navDash: '📊 Unified Dashboard',
     navLoc: '📍 Location & Map',
     navPlots: '🧪 Soil & Plot',
-    heroSubtitle: 'Unified agroclimatic, satellite, and soil intelligence platform.',
+    heroSubtitle: 'Unified agroclimatic, satellite, soil, and market demand intelligence platform.',
     heroChangeLoc: '📍 Change location',
     heroEditSoil: '🧪 Configure soil',
+    heroDownloadSummary: '⬇️ Download summary card',
     quickAlerts: '⚠️ Alerts & Climate',
     quickGauss: '📈 Gaussian Curves & Annual Climate',
-    quickCrops: '🌾 Crops, Calendar & Irrigation',
+    quickCrops: '🌾 39 Crops, Market Demand & Irrigation',
 
     // Location view
     locTitle: 'Geographic Location',
@@ -126,7 +160,7 @@ const DICT = {
     impactWater: 'Assumes rainfed conditions, which may penalize high-water crops if irrigation is available.',
 
     // Dashboard blocks
-    loadingData: 'Synchronizing meteorological, climatic, satellite, and topographic data…',
+    loadingData: 'Synchronizing meteorological, climatic, satellite, market, and topographic data…',
     weatherFetchError: 'Could not retrieve weather data ({msg}). Check your connection and try again.',
     unexpectedError: 'Unexpected error',
     noWeatherData: 'No meteorological data available for this location.',
@@ -144,7 +178,7 @@ const DICT = {
     blkAlertsSub: 'Distinguishing current observations, satellite estimates, and historical baselines',
     domAtmosphere: '🌡️ Atmosphere (2m) & Land / Canopy Surface',
     domHydrology: '💧 Water Balance & Soil Moisture (GPM + SMAP)',
-    domPhysics: '☀️ Agroclimatic Physics: Light, Frost & Freeze–Thaw',
+    domPhysics: '☀️ Agroclimatic Physics: Light, Frost, Freeze–Thaw & Market',
 
     kpiAirTemp: 'Current air temp (2m)',
     kpiAirTempSub: 'Open-Meteo observation',
@@ -175,9 +209,8 @@ const DICT = {
     kpiCyclesYr: 'cycles/yr',
     kpiSubZeroDays: 'Days <0°C',
     kpiMaxSpell: 'Max streak',
-    kpiLandUse: 'Land use (USDA)',
-    kpiInUs: 'Inside US',
-    kpiOutsideUs: 'Outside US',
+    kpiMarketSource: 'Market Demand (USDA AMS)',
+    kpiMarketSub: '39 global crops indexed · ams.usda.gov',
 
     // Charts & Gaussian
     blkGaussTitle: '📈 Annual Climate Behavior & Thermal Distribution (Gaussian Curve)',
@@ -208,13 +241,17 @@ const DICT = {
     statExtremes: 'Extremes',
 
     // Crops & Recommendations
-    blkCropsTitle: '🌾 Recommended Crops, Calendar & Irrigation (Weighted Evaluation)',
-    irrStageLabel: 'Phenological stage for irrigation:',
+    blkCropsTitle: '🌾 Recommended Crops (39), Market Demand, Calendar & Irrigation',
+    cropSearchPlaceholder: 'Filter crops by name or family…',
+    cropFilterAll: 'All 39 crops',
+    cropFilterTop: 'Favorable only (≥ 75)',
+    cropFilterHighDemand: 'High market demand (USDA AMS)',
+    irrStageLabel: 'Irrigation stage:',
     stageInitial: 'Initial (Kc × 0.40)',
     stageDev: 'Development (Kc × 0.75)',
     stageMid: 'Mid-season / Flowering (Kc × 1.00)',
     stageLate: 'Late / Ripening (Kc × 0.70)',
-    weightsSummary: 'Physiological weights: Water 30% · Thermal & Frost 30% · Soil 20% · Topography, Light & Rotation 20%. Includes calendar for',
+    weightsSummary: 'Weighted model: Water 30% · Thermal & Frost 30% · Soil 20% · Topography, Light, Rotation & USDA AMS Demand 20%. Calendar for',
     calLegendS: 'Sowing',
     calLegendG: 'Growth',
     calLegendH: 'Harvest',
@@ -226,25 +263,32 @@ const DICT = {
     liebigCapNote: '⚠ Capped by a critical physiological limiting factor (Liebig’s Law).',
     advantagesTitle: '✔ Key advantages:',
     limitingTitle: '⚠ Limiting factors:',
+    marketDemandTitle: '📈 USDA AMS Market Demand:',
+    demandHigh: 'High demand',
+    demandModHigh: 'Moderate-high demand',
+    demandMod: 'Moderate demand',
     irr7dTitle: '💧 7-day irrigation:',
     auditSummary: 'View full scoring audit ({count} criteria evaluated)',
     weightWord: 'Weight',
     scoreWord: 'Score',
+    btnDownloadCard: '⬇️ Download card',
 
-    footerText: 'Data: Open-Meteo (Forecast / Copernicus ERA5 / NASA SRTM) · NASA POWER (GPM / SMAP) · ISRIC SoilGrids · USDA · OpenStreetMap. Advisory information only; yields are not guaranteed.'
+    footerText: 'AgroVision · Data: Open-Meteo (Forecast / Copernicus ERA5 / NASA SRTM) · NASA POWER (GPM / SMAP) · ISRIC SoilGrids · USDA AMS Market News · OpenStreetMap. Advisory information only; yields are not guaranteed.'
   },
 
   es: {
-    appTitle: 'AgroGuía · Inteligencia Agrícola',
+    appName: 'AgroVision',
+    appTitle: 'AgroVision · Inteligencia Agrícola',
     navDash: '📊 Panel Unificado',
     navLoc: '📍 Ubicación y Mapa',
     navPlots: '🧪 Suelo y Lote',
-    heroSubtitle: 'Plataforma unificada de inteligencia agroclimática, satelital y edáfica.',
+    heroSubtitle: 'Plataforma unificada de inteligencia agroclimática, satelital, edáfica y de demanda de mercado.',
     heroChangeLoc: '📍 Cambiar ubicación',
     heroEditSoil: '🧪 Configurar suelo',
+    heroDownloadSummary: '⬇️ Descargar tarjeta resumen',
     quickAlerts: '⚠️ Alertas y Clima',
     quickGauss: '📈 Curvas de Gauss y Clima Anual',
-    quickCrops: '🌾 Cultivos, Calendario y Riego',
+    quickCrops: '🌾 39 Cultivos, Demanda y Riego',
 
     // Location view
     locTitle: 'Ubicación geográfica',
@@ -330,7 +374,7 @@ const DICT = {
     impactWater: 'Se asume condición de secano (dependiente de lluvia), lo que puede penalizar cultivos de alta demanda hídrica si tenés riego.',
 
     // Dashboard blocks
-    loadingData: 'Sincronizando datos meteorológicos, climáticos, satelitales y topográficos…',
+    loadingData: 'Sincronizando datos meteorológicos, climáticos, satelitales, de mercado y topográficos…',
     weatherFetchError: 'No se pudo obtener el clima ({msg}). Verificá tu conexión e intentá de nuevo.',
     unexpectedError: 'Error inesperado',
     noWeatherData: 'Sin datos meteorológicos disponibles para esta ubicación.',
@@ -348,7 +392,7 @@ const DICT = {
     blkAlertsSub: 'Diferenciando observaciones actuales, estimaciones satelitales e historial',
     domAtmosphere: '🌡️ Atmósfera (2m) y Superficie Terrestre / Dosel',
     domHydrology: '💧 Balance Hídrico y Humedad del Suelo (GPM + SMAP)',
-    domPhysics: '☀️ Física Agroclimática: Luz, Heladas y Congelamiento',
+    domPhysics: '☀️ Física Agroclimática: Luz, Heladas, Congelamiento y Mercado',
 
     kpiAirTemp: 'Temp. aire actual (2m)',
     kpiAirTempSub: 'Observación Open-Meteo',
@@ -379,9 +423,8 @@ const DICT = {
     kpiCyclesYr: 'ciclos/año',
     kpiSubZeroDays: 'Días <0°C',
     kpiMaxSpell: 'Máx racha',
-    kpiLandUse: 'Uso del suelo (USDA)',
-    kpiInUs: 'En EE.UU.',
-    kpiOutsideUs: 'Fuera de EE.UU.',
+    kpiMarketSource: 'Demanda de Mercado (USDA AMS)',
+    kpiMarketSub: '39 cultivos globales indexados · ams.usda.gov',
 
     // Charts & Gaussian
     blkGaussTitle: '📈 Comportamiento Climático Anual y Distribución Térmica (Campana de Gauss)',
@@ -412,13 +455,17 @@ const DICT = {
     statExtremes: 'Extremos',
 
     // Crops & Recommendations
-    blkCropsTitle: '🌾 Cultivos Recomendados, Calendario y Riego (Evaluación Ponderada)',
-    irrStageLabel: 'Etapa fenológica para riego:',
+    blkCropsTitle: '🌾 Cultivos Recomendados (39), Demanda, Calendario y Riego',
+    cropSearchPlaceholder: 'Filtrar cultivos por nombre o familia…',
+    cropFilterAll: 'Todos los 39 cultivos',
+    cropFilterTop: 'Solo favorables (≥ 75)',
+    cropFilterHighDemand: 'Alta demanda de mercado (USDA AMS)',
+    irrStageLabel: 'Etapa riego:',
     stageInitial: 'Inicial (Kc × 0.40)',
     stageDev: 'Desarrollo (Kc × 0.75)',
     stageMid: 'Media / Floración (Kc × 1.00)',
     stageLate: 'Final / Maduración (Kc × 0.70)',
-    weightsSummary: 'Ponderación fisiológica: Hídrico 30% · Térmico y Heladas 30% · Suelo 20% · Topografía, Luz y Rotación 20%. Incluye calendario',
+    weightsSummary: 'Ponderación: Hídrico 30% · Térmico y Heladas 30% · Suelo 20% · Topografía, Luz, Rotación y Demanda USDA AMS 20%. Calendario',
     calLegendS: 'Siembra',
     calLegendG: 'Crecimiento',
     calLegendH: 'Cosecha',
@@ -430,19 +477,24 @@ const DICT = {
     liebigCapNote: '⚠ Limitado por factor crítico fisiológico (Ley de Liebig).',
     advantagesTitle: '✔ Ventajas:',
     limitingTitle: '⚠ Factores limitantes:',
+    marketDemandTitle: '📈 Demanda USDA AMS:',
+    demandHigh: 'Demanda alta',
+    demandModHigh: 'Demanda media-alta',
+    demandMod: 'Demanda moderada',
     irr7dTitle: '💧 Riego 7 días:',
     auditSummary: 'Ver auditoría completa ({count} criterios evaluados)',
     weightWord: 'Peso',
     scoreWord: 'Nota',
+    btnDownloadCard: '⬇️ Descargar tarjeta',
 
-    footerText: 'Datos: Open-Meteo (Forecast / Copernicus ERA5 / NASA SRTM) · NASA POWER (GPM / SMAP) · ISRIC SoilGrids · USDA · OpenStreetMap. Información orientativa; no garantiza rendimientos.'
+    footerText: 'AgroVision · Datos: Open-Meteo (Forecast / Copernicus ERA5 / NASA SRTM) · NASA POWER (GPM / SMAP) · ISRIC SoilGrids · USDA AMS Market News · OpenStreetMap. Información orientativa; no garantiza rendimientos.'
   }
 };
 
 export function getLang() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved === 'es' ? 'es' : 'en'; // Inglés por defecto
+    const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+    return saved === 'es' ? 'es' : 'en';
   } catch (_) {
     return 'en';
   }
