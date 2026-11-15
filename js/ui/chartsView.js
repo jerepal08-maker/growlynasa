@@ -1,5 +1,5 @@
-import { MONTH_NAMES } from '../config.js';
 import { buildGaussianComparisonData } from '../domain/statistics.js';
+import { t, getMonthNames, getLang } from '../i18n/translations.js';
 
 export function renderGaussianChart(canvasEl, chartStore, era5, mode = 'all_curves') {
   if (!canvasEl || !era5?.records?.length) return null;
@@ -11,10 +11,23 @@ export function renderGaussianChart(canvasEl, chartStore, era5, mode = 'all_curv
     chartStore.gaussian.destroy();
   }
 
+  const lang = getLang();
+  const translateCurveLabel = (rawLabel) => {
+    if (lang === 'es') return rawLabel;
+    return rawLabel
+      .replace('Temp. Mínima diaria (Tmin)', 'Daily Min Temp (Tmin)')
+      .replace('Temp. Media diaria (Tmean)', 'Daily Mean Temp (Tmean)')
+      .replace('Temp. Máxima diaria (Tmax)', 'Daily Max Temp (Tmax)')
+      .replace('Período', 'Period')
+      .replace('(T media)', '(Tmean)')
+      .replace('Semestre cálido (Oct–Mar)', 'Warm half-year (Oct–Mar)')
+      .replace('Semestre frío (Abr–Sep)', 'Cold half-year (Apr–Sep)');
+  };
+
   const datasets = [
     {
       type: 'bar',
-      label: 'Frecuencia observada Tmedia (ERA5)',
+      label: t('chartObservedHist'),
       data: gaussianData.histogramDensity,
       backgroundColor: 'rgba(76, 139, 63, 0.16)',
       borderColor: 'rgba(76, 139, 63, 0.35)',
@@ -25,7 +38,7 @@ export function renderGaussianChart(canvasEl, chartStore, era5, mode = 'all_curv
     },
     ...gaussianData.curves.map((curve) => ({
       type: 'line',
-      label: `${curve.label} (μ=${curve.stats.mean}°C, σ=${curve.stats.std}°C)`,
+      label: `${translateCurveLabel(curve.label)} (μ=${curve.stats.mean}°C, σ=${curve.stats.std}°C)`,
       data: curve.data,
       borderColor: curve.color,
       backgroundColor: curve.color + '22',
@@ -51,21 +64,16 @@ export function renderGaussianChart(canvasEl, chartStore, era5, mode = 'all_curv
       plugins: {
         title: {
           display: true,
-          text: `Distribución Térmica Gaussiana (Campana de Gauss) · ${era5.source}`
-        },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => `${ctx.dataset.label}: densidad ${Number(ctx.parsed.y).toFixed(4)}`
-          }
+          text: `${t('chartGaussTitle')} · ${era5.source}`
         }
       },
       scales: {
         x: {
-          title: { display: true, text: 'Temperatura (°C)' },
+          title: { display: true, text: t('chartTempAxis') },
           ticks: { maxTicksLimit: 14 }
         },
         y: {
-          title: { display: true, text: 'Densidad de probabilidad f(T)' },
+          title: { display: true, text: t('chartDensityAxis') },
           beginAtZero: true
         }
       }
@@ -95,7 +103,7 @@ export function renderAnnualHydrologyChart(canvasEl, chartStore, era5, clim) {
   const datasets = [
     {
       type: 'bar',
-      label: hasEra5 ? 'Precipitación media mensual (ERA5 10a, mm)' : 'Precipitación mensual (NASA POWER, mm)',
+      label: hasEra5 ? t('chartRainEra5') : t('chartRainNasa'),
       data: rainMonthly,
       backgroundColor: '#3b82f6aa',
       borderRadius: 6
@@ -105,7 +113,7 @@ export function renderAnnualHydrologyChart(canvasEl, chartStore, era5, clim) {
   if (et0Monthly.length) {
     datasets.push({
       type: 'line',
-      label: 'Demanda atmosférica ET0 (mm/mes)',
+      label: t('chartEt0Line'),
       data: et0Monthly,
       borderColor: '#d97706',
       backgroundColor: '#d9770622',
@@ -116,20 +124,20 @@ export function renderAnnualHydrologyChart(canvasEl, chartStore, era5, clim) {
 
   chartStore.hydrology = new window.Chart(canvasEl, {
     type: 'bar',
-    data: { labels: MONTH_NAMES, datasets },
+    data: { labels: getMonthNames(), datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
         title: {
           display: true,
-          text: 'Régimen Hídrico Anual (Acumulados mensuales vs. Evapotranspiración ET0)'
+          text: t('chartHydroTitle')
         }
       },
       scales: {
         y: {
           beginAtZero: true,
-          title: { display: true, text: 'Milímetros (mm / mes)' }
+          title: { display: true, text: t('chartMmAxis') }
         }
       }
     }
@@ -149,11 +157,11 @@ export function renderAgroPhysicsChart(canvasEl, chartStore, agroPhysics) {
   chartStore.agroPhysics = new window.Chart(canvasEl, {
     type: 'bar',
     data: {
-      labels: MONTH_NAMES,
+      labels: getMonthNames(),
       datasets: [
         {
           type: 'line',
-          label: 'Horas de luz (Fotoperíodo, h/día)',
+          label: t('chartDaylightLine'),
           data: daylight,
           borderColor: '#eab308',
           backgroundColor: '#eab30822',
@@ -163,14 +171,14 @@ export function renderAgroPhysicsChart(canvasEl, chartStore, agroPhysics) {
         },
         {
           type: 'bar',
-          label: 'Días con helada (Tmin ≤ 0°C)',
+          label: t('chartFrostBars'),
           data: frostDays,
           backgroundColor: '#0284c7aa',
           yAxisID: 'yDays'
         },
         {
           type: 'bar',
-          label: 'Ciclos congelación-deshielo',
+          label: t('chartFreezeThawBars'),
           data: freezeThaw,
           backgroundColor: '#8b5cf6aa',
           yAxisID: 'yDays'
@@ -183,7 +191,7 @@ export function renderAgroPhysicsChart(canvasEl, chartStore, agroPhysics) {
       plugins: {
         title: {
           display: true,
-          text: 'Fotoperíodo Anual vs. Riesgo Mensual de Heladas y Congelación-Deshielo'
+          text: t('chartPhysicsTitle')
         }
       },
       scales: {
@@ -192,14 +200,14 @@ export function renderAgroPhysicsChart(canvasEl, chartStore, agroPhysics) {
           position: 'left',
           min: 6,
           max: 18,
-          title: { display: true, text: 'Horas de luz (h)' }
+          title: { display: true, text: t('chartLightAxis') }
         },
         yDays: {
           type: 'linear',
           position: 'right',
           beginAtZero: true,
           grid: { drawOnChartArea: false },
-          title: { display: true, text: 'Días promedio / mes' }
+          title: { display: true, text: t('chartDaysAxis') }
         }
       }
     }
