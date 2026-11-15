@@ -1,7 +1,7 @@
 /**
  * Cloudflare Worker Proxy para AgroGuía
- * Permite consultar USDA CropScape (XML->JSON), FAO GAEZ y NASA AppEEARS (ECOSTRESS)
- * manteniendo los tokens privados en variables de entorno (env.EARTHDATA_TOKEN).
+ * Permite consultar USDA CropScape (XML->JSON), FAO GAEZ, USDA Ag Data Commons
+ * y NASA AppEEARS (ECOSTRESS) manteniendo los tokens privados en env.EARTHDATA_TOKEN.
  */
 
 const CORS_HEADERS = {
@@ -21,7 +21,7 @@ export default {
     const path = url.pathname;
 
     try {
-      // 1. Ruta USDA CropScape (consulta últimos 3 años disponibles en coordenadas EPSG:5070)
+      // 1. Ruta USDA CropScape (últimos 3 años disponibles en coordenadas EPSG:5070)
       if (path.endsWith('/cropscape')) {
         const x = url.searchParams.get('x');
         const y = url.searchParams.get('y');
@@ -55,7 +55,6 @@ export default {
           return jsonResponse({ error: 'EARTHDATA_TOKEN no configurado en el Worker.' }, 501);
         }
 
-        // Consulta puntual a AppEEARS (ECO2LSTE.001 / ECO3ETPTJPL.001)
         const end = new Date().toISOString().slice(0, 10);
         const startObj = new Date();
         startObj.setDate(startObj.getDate() - 30);
@@ -80,7 +79,25 @@ export default {
         });
       }
 
-      // 3. Ruta FAO GAEZ v4 (consulta de aptitud agroecológica)
+      // 3. Ruta USDA Ag Data Commons (CKAN API sin bloqueo CORS)
+      if (path.endsWith('/usda')) {
+        const q = url.searchParams.get('q') || 'crop yield soil';
+        const ckanUrl = `https://data.nal.usda.gov/api/3/action/package_search?q=${encodeURIComponent(q)}&rows=3`;
+        const res = await fetch(ckanUrl);
+        if (!res.ok) return jsonResponse({ error: `USDA HTTP ${res.status}` }, res.status);
+        const data = await res.json();
+        const results = data?.result?.results || [];
+        return jsonResponse({
+          totalMatches: data?.result?.count || 0,
+          datasets: results.map((ds) => ({
+            title: ds.title,
+            name: ds.name,
+            url: `https://data.nal.usda.gov/dataset/${ds.name}`
+          }))
+        });
+      }
+
+      // 4. Ruta FAO GAEZ v4
       if (path.endsWith('/faogaez')) {
         const lat = url.searchParams.get('lat');
         const lon = url.searchParams.get('lon');
@@ -92,7 +109,10 @@ export default {
         });
       }
 
-      return jsonResponse({ status: 'AgroGuía Proxy activo', endpoints: ['/cropscape', '/ecostress', '/faogaez'] });
+      return jsonResponse({
+        status: 'AgroGuía Proxy activo',
+        endpoints: ['/cropscape', '/ecostress', '/usda', '/faogaez']
+      });
     } catch (err) {
       return jsonResponse({ error: err.message }, 500);
     }
