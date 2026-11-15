@@ -97,33 +97,33 @@ export function downloadCropCardPng({ crop, evalRes, irrRes, loc, profile }) {
     92
   );
 
-  // Título del cultivo + Score
-  const cropTitle = `${crop.i} ${getCropName(crop)}`;
-  ctx.fillStyle = '#1f261e';
-  ctx.font = 'bold 28px system-ui, -apple-system, sans-serif';
-  ctx.fillText(cropTitle, 48, 178);
-
-  ctx.fillStyle = '#5b6659';
-  ctx.font = 'italic 15px system-ui, -apple-system, sans-serif';
-  const titleWidth = ctx.measureText(cropTitle).width;
-  ctx.fillText(`(${crop.scientific}) · ${crop.family}`, 60 + titleWidth, 178);
-
-  // Pill de puntaje
+  // Pill de puntaje (derecha)
   const sc = scoreColor(evalRes.score);
   const badgeText = `${evalRes.score}/100 · ${evalRes.classification.label}`;
   ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
   const badgeW = ctx.measureText(badgeText).width + 30;
-  roundRect(ctx, W - 48 - badgeW, 149, badgeW, 36, 18);
+  roundRect(ctx, W - 48 - badgeW, 148, badgeW, 36, 18);
   ctx.fillStyle = sc.bg;
   ctx.fill();
   ctx.fillStyle = sc.fg;
-  ctx.fillText(badgeText, W - 33 - badgeW, 172);
+  ctx.fillText(badgeText, W - 33 - badgeW, 171);
+
+  // Título del cultivo (línea 1) y nombre científico (línea 2 dedicada)
+  const maxTitleWidth = W - 96 - badgeW - 18;
+  const cropTitle = `${crop.i} ${getCropName(crop)}`;
+  ctx.fillStyle = '#1f261e';
+  ctx.font = 'bold 26px system-ui, -apple-system, sans-serif';
+  ctx.fillText(cropTitle, 48, 166, maxTitleWidth);
+
+  ctx.fillStyle = '#5b6659';
+  ctx.font = 'italic 14.5px system-ui, -apple-system, sans-serif';
+  ctx.fillText(`${crop.scientific} · ${crop.family}`, 48, 188, maxTitleWidth);
 
   // Barra de progreso
-  roundRect(ctx, 48, 196, W - 96, 10, 5);
+  roundRect(ctx, 48, 202, W - 96, 10, 5);
   ctx.fillStyle = '#e6eae2';
   ctx.fill();
-  roundRect(ctx, 48, 196, Math.max(12, ((W - 96) * evalRes.score) / 100), 10, 5);
+  roundRect(ctx, 48, 202, Math.max(12, ((W - 96) * evalRes.score) / 100), 10, 5);
   ctx.fillStyle = sc.bar;
   ctx.fill();
 
@@ -371,7 +371,7 @@ export function downloadSummaryCardPng({ loc, wx, nasaDaily, topo, profile, agro
 
     ctx.fillStyle = '#1f261e';
     ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
-    ctx.fillText(`#${idx + 1}  ${crop.i} ${getCropName(crop)}`, 64, ry + 29);
+    ctx.fillText(`#${idx + 1}  ${crop.i} ${getCropName(crop)}`, 64, ry + 29, 280);
 
     const mktText = evalRes.marketProfile
       ? `USDA AMS Demand: ${evalRes.marketProfile.demandIndex}/100`
