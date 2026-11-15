@@ -11,22 +11,31 @@
 <body>
   <nav>
     <div class="brand">🌱 AgroGuía</div>
-    <button data-s="dash" class="on">📊 Panel</button>
-    <button data-s="loc">📍 Ubicación</button>
-    <button data-s="crops">🌾 ¿Qué plantar?</button>
-    <button data-s="cal">📅 Calendario</button>
+    <button data-s="dash" class="on">📊 Panel Unificado</button>
+    <button data-s="loc">📍 Ubicación y Mapa</button>
     <button data-s="plots">🧪 Suelo y Lote</button>
-    <button data-s="irr">💧 Riego</button>
-    <button data-s="alerts">⚠️ Alertas</button>
     <small id="where"></small>
   </nav>
 
   <main>
     <section id="dash" class="on">
       <div class="hero">
-        <h1>🌱 AgroGuía</h1>
-        <p>Decisiones agrícolas con datos meteorológicos, climáticos y satelitales reales.</p>
+        <div>
+          <h1>🌱 AgroGuía</h1>
+          <p>Plataforma unificada de inteligencia agroclimática, satelital y edáfica.</p>
+        </div>
+        <div class="row" style="margin:0">
+          <button type="button" class="secondary" id="heroChangeLoc">📍 Cambiar ubicación</button>
+          <button type="button" class="secondary" id="heroEditSoil">🧪 Configurar suelo</button>
+        </div>
       </div>
+
+      <nav class="quick-nav" aria-label="Navegación rápida del panel">
+        <a href="#blk-alerts">⚠️ Alertas y Clima</a>
+        <a href="#blk-gauss">📈 Curvas de Gauss y Clima Anual</a>
+        <a href="#blk-crops">🌾 Cultivos, Calendario y Riego</a>
+      </nav>
+
       <div id="status"></div>
       <div id="dashBody"></div>
     </section>
@@ -49,19 +58,6 @@
       </div>
       <div id="map"></div>
       <p class="note">Hacé clic en el mapa para elegir el punto exacto de análisis.</p>
-    </section>
-
-    <section id="crops">
-      <h2>¿Qué puedo plantar?</h2>
-      <div id="cropsBody"></div>
-    </section>
-
-    <section id="cal">
-      <h2>Calendario agrícola</h2>
-      <div class="row">
-        <select id="calCrop"></select>
-      </div>
-      <div id="calBody"></div>
     </section>
 
     <section id="plots">
@@ -137,27 +133,8 @@
       <div id="plotList" class="grid"></div>
     </section>
 
-    <section id="irr">
-      <h2>Recomendaciones de riego</h2>
-      <div class="row">
-        <select id="irrCrop"></select>
-        <select id="irrStage">
-          <option value=".4">Inicial</option>
-          <option value=".75" selected>Desarrollo</option>
-          <option value="1">Media (floración)</option>
-          <option value=".7">Final</option>
-        </select>
-      </div>
-      <div id="irrBody"></div>
-    </section>
-
-    <section id="alerts">
-      <h2>Alertas y riesgos</h2>
-      <div id="alertBody"></div>
-    </section>
-
     <footer>
-      Datos: Open-Meteo (ERA5/SRTM) · NASA POWER (GPM/SMAP) · ISRIC SoilGrids · USDA · OpenStreetMap. Información orientativa; no garantiza rendimientos.
+      Datos: Open-Meteo (Forecast / Copernicus ERA5 / NASA SRTM) · NASA POWER (GPM / SMAP) · ISRIC SoilGrids · USDA · OpenStreetMap. Información orientativa; no garantiza rendimientos.
     </footer>
   </main>
 
