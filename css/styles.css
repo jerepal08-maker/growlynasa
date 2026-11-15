@@ -42,11 +42,33 @@ body > nav {
   height: 100vh;
   flex-shrink: 0;
 }
-
 .brand {
   font-size: 1.4rem;
   font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.lang-switch {
+  display: flex;
+  gap: 6px;
   margin-bottom: 10px;
+}
+
+.lang-switch button {
+  flex: 1;
+  text-align: center;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e6f0e2;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.lang-switch button.on {
+  background: #fff;
+  color: var(--g1);
+}
 }
 
 body > nav button {
