@@ -2,6 +2,8 @@ import { CONFIG, MONTH_NAMES, PRESET_REGIONS } from './config.js';
 import { searchLocations, fetchWeatherForecast, fetchNasaClimatology } from './services/weatherService.js';
 import { fetchEra5History } from './services/era5Service.js';
 import { fetchTopography } from './services/topographyService.js';
+import { fetchNasaPowerDaily } from './services/nasaPowerDailyService.js';
+import { fetchSoilEstimate } from './services/soilService.js';
 import { CROPS, buildAgroContext, evaluateCrop, generateAlerts, calculateIrrigation } from './domain/agronomyEngine.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -13,6 +15,8 @@ const state = {
   clim: null,
   era5: null,
   topo: null,
+  nasaDaily: null,
+  soilEst: null,
   charts: {},
   map: null,
   marker: null,
@@ -77,30 +81,35 @@ async function loadLocationData() {
   const { signal } = state.abortCtrl;
 
   $('#where').textContent = `📍 ${state.loc.name}`;
-  $('#status').innerHTML = '<div class="load">Cargando datos meteorológicos, climáticos y satelitales…</div>';
+  $('#status').innerHTML = '<div class="load">Cargando datos meteorológicos, climáticos, satelitales y de suelo…</div>';
 
   try {
-    const [wxResult, climResult, era5Result, topoResult] = await Promise.allSettled([
+    const [wxRes, climRes, era5Res, topoRes, nasaDailyRes, soilRes] = await Promise.allSettled([
       fetchWeatherForecast(state.loc.lat, state.loc.lon, signal),
       fetchNasaClimatology(state.loc.lat, state.loc.lon, signal),
       fetchEra5History(state.loc.lat, state.loc.lon, signal),
-      fetchTopography(state.loc.lat, state.loc.lon, signal)
+      fetchTopography(state.loc.lat, state.loc.lon, signal),
+      fetchNasaPowerDaily(state.loc.lat, state.loc.lon, signal),
+      fetchSoilEstimate(state.loc.lat, state.loc.lon, signal)
     ]);
 
     if (signal.aborted) return;
 
-    if (wxResult.status === 'fulfilled') {
-      state.wx = wxResult.value;
+    if (wxRes.status === 'fulfilled') {
+      state.wx = wxRes.value;
       $('#status').innerHTML = '';
     } else {
-      if (wxResult.reason?.name === 'AbortError') return;
+      if (wxRes.reason?.name === 'AbortError') return;
       state.wx = null;
-      $('#status').innerHTML = `<div class="err">No se pudo obtener el clima (${escHtml(wxResult.reason.message)}). Verificá tu conexión e intentá de nuevo.</div>`;
+      $('#status').innerHTML = `<div class="err">No se pudo obtener el clima (${escHtml(wxRes.reason.message)}). Verificá tu conexión e intentá de nuevo.</div>`;
     }
 
-    state.clim = climResult.status === 'fulfilled' ? climResult.value : null;
-    state.era5 = era5Result.status === 'fulfilled' ? era5Result.value : null;
-    state.topo = topoResult.status === 'fulfilled' ? topoResult.value : null;
+    state.clim = climRes.status === 'fulfilled' ? climRes.value : null;
+    state.era5 = era5Res.status === 'fulfilled' ? era5Res.value : null;
+    state.topo = topoRes.status === 'fulfilled' ? topoRes.value : null;
+    state.nasaDaily = nasaDailyRes.status === 'fulfilled' ? nasaDailyRes.value : null;
+    state.soilEst = soilRes.status === 'fulfilled' ? soilRes.value : null;
+
     renderAll();
   } catch (err) {
     if (err.name === 'AbortError') return;
@@ -137,19 +146,25 @@ function renderDashboard() {
   const w = state.wx;
   const c = w.current;
   const d0 = w.daily[0];
+  const nd = state.nasaDaily?.summary;
+  const soil = state.soilEst;
+
   const kpi = (title, value, sub) => `<div class="k"><small>${title}</small><b>${value}</b><small>${sub || ''}</small></div>`;
   const cacheBadge = w.fromCache ? ' · (Caché local)' : '';
 
   el.innerHTML = `
     <p class="note">Fuente: ${w.source}${cacheBadge} · Actualizado: ${w.fetchedAt.toLocaleString('es-AR')} · Observación: ${escHtml(w.obsTime || 's/d')} · ${escHtml(state.loc.name)}</p>
     <div class="grid">
-      ${kpi('Temperatura actual', fmtVal(c.temp, '°C'), 'Dato actual')}
+      ${kpi('Temperatura aire (2m)', fmtVal(c.temp, '°C'), 'Dato actual')}
+      ${kpi('Temp. superficial (Piel)', nd?.latestSkinTemp != null ? `${nd.latestSkinTemp} °C` : 'sin datos', 'NASA POWER (satelital)')}
       ${kpi('Humedad relativa', fmtVal(c.rh, '%', 0), 'Dato actual')}
-      ${kpi('Precipitación', fmtVal(c.rain, 'mm'), 'Última hora')}
+      ${kpi('Precipitación actual', fmtVal(c.rain, 'mm'), 'Última hora')}
+      ${kpi('Lluvia anual (GPM)', nd ? `${nd.annualRainMm} mm` : 'sin datos', nd ? `Últimos 30d: ${nd.rain30dMm} mm · Racha seca: ${nd.maxDrySpell90d}d` : '')}
       ${kpi('Viento', fmtVal(c.wind, 'km/h', 0), fmtWindDir(c.windDir))}
       ${kpi('Radiación solar', fmtVal(c.radiation, 'W/m²', 0), 'Dato actual')}
       ${kpi('Evapotranspiración (ET0)', fmtVal(d0.et0, 'mm'), 'Estimación de hoy')}
-      ${kpi('Humedad del suelo', w.soilMoisture == null ? 'sin datos' : `${(w.soilMoisture * 100).toFixed(0)} %`, 'Estimación 3–9 cm')}
+      ${kpi('Humedad suelo (SMAP)', nd?.latestSoilRootPct != null ? `Raíz: ${nd.latestSoilRootPct}%` : 'sin datos', nd ? `Superf: ${nd.latestSoilTopPct}% · Tendencia: ${nd.rootTrend}` : '')}
+      ${kpi('Suelo estimado (SoilGrids)', soil?.textureClass ? `${soil.textureClass}` : 'no disponible', soil?.ph != null ? `pH ${soil.ph} · MO ${soil.organicMatterPct}% (Estimado)` : 'Sin datos edáficos')}
       ${kpi('Altitud (SRTM)', state.topo?.elevationMeters != null ? `${state.topo.elevationMeters} m s.n.m.` : 'sin datos', state.topo ? `Pendiente: ${state.topo.slopePercent}% (${state.topo.terrainClass})` : '')}
       ${kpi('Historial ERA5', state.era5 ? `${state.era5.period.totalDays} días` : 'no disponible', state.era5 ? state.era5.source : '')}
     </div>
