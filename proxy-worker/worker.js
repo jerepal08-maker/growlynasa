@@ -1,7 +1,7 @@
 /**
- * Cloudflare Worker Proxy para AgroGuía
- * Permite consultar USDA CropScape (XML->JSON), FAO GAEZ, USDA Ag Data Commons
- * y NASA AppEEARS (ECOSTRESS) manteniendo los tokens privados en env.EARTHDATA_TOKEN.
+ * Cloudflare Worker Proxy para AgroVision
+ * Conecta USDA CropScape, NASA AppEEARS (ECOSTRESS), USDA Ag Data Commons
+ * y USDA AMS Market News (MARS API v1.2) manteniendo claves privadas en el servidor.
  */
 
 const CORS_HEADERS = {
@@ -79,7 +79,39 @@ export default {
         });
       }
 
-      // 3. Ruta USDA Ag Data Commons (CKAN API sin bloqueo CORS)
+      // 3. Ruta USDA AMS Market News (MARS API v1.2 - https://www.ams.usda.gov/market-news)
+      if (path.endsWith('/market-demand')) {
+        if (!env.USDA_AMS_API_KEY) {
+          return jsonResponse({
+            reports: [],
+            note: 'USDA_AMS_API_KEY no configurada; usando perfiles calibrados USDA AMS.'
+          });
+        }
+
+        const basicToken = btoa(`${env.USDA_AMS_API_KEY}:`);
+        const marsUrl = 'https://marsapi.ams.usda.gov/services/v1.2/reports';
+        const res = await fetch(marsUrl, {
+          headers: { Authorization: `Basic ${basicToken}` }
+        });
+
+        if (!res.ok) {
+          return jsonResponse({ error: `USDA AMS MARS HTTP ${res.status}` }, res.status);
+        }
+
+        const reports = await res.json();
+        const summary = Array.isArray(reports)
+          ? reports.slice(0, 15).map((r) => ({
+              slugId: r.slug_id,
+              title: r.report_title,
+              publishedDate: r.published_date,
+              marketTypes: r.market_types
+            }))
+          : [];
+
+        return jsonResponse({ reports: summary });
+      }
+
+      // 4. Ruta USDA Ag Data Commons
       if (path.endsWith('/usda')) {
         const q = url.searchParams.get('q') || 'crop yield soil';
         const ckanUrl = `https://data.nal.usda.gov/api/3/action/package_search?q=${encodeURIComponent(q)}&rows=3`;
@@ -97,21 +129,9 @@ export default {
         });
       }
 
-      // 4. Ruta FAO GAEZ v4
-      if (path.endsWith('/faogaez')) {
-        const lat = url.searchParams.get('lat');
-        const lon = url.searchParams.get('lon');
-        if (!lat || !lon) return jsonResponse({ error: 'Faltan parámetros lat, lon' }, 400);
-
-        return jsonResponse({
-          suitabilityByCrop: {},
-          dominantConstraint: 'Evaluado mediante parámetros agroclimáticos regionales'
-        });
-      }
-
       return jsonResponse({
-        status: 'AgroGuía Proxy activo',
-        endpoints: ['/cropscape', '/ecostress', '/usda', '/faogaez']
+        status: 'AgroVision Proxy activo',
+        endpoints: ['/cropscape', '/ecostress', '/market-demand', '/usda']
       });
     } catch (err) {
       return jsonResponse({ error: err.message }, 500);
