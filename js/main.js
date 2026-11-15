@@ -1,168 +1,569 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AgroGuía</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
-  <link rel="stylesheet" href="./css/styles.css">
-</head>
-<body>
-  <nav>
-    <div class="brand">🌱 AgroGuía</div>
-    <button data-s="dash" class="on">📊 Panel</button>
-    <button data-s="loc">📍 Ubicación</button>
-    <button data-s="crops">🌾 ¿Qué plantar?</button>
-    <button data-s="cal">📅 Calendario</button>
-    <button data-s="plots">🧪 Suelo y Lote</button>
-    <button data-s="irr">💧 Riego</button>
-    <button data-s="alerts">⚠️ Alertas</button>
-    <small id="where"></small>
-  </nav>
+import { CONFIG, MONTH_NAMES, PRESET_REGIONS } from './config.js';
+import { searchLocations, fetchWeatherForecast, fetchNasaClimatology } from './services/weatherService.js';
+import { fetchEra5History } from './services/era5Service.js';
+import { fetchTopography } from './services/topographyService.js';
+import { fetchNasaPowerDaily } from './services/nasaPowerDailyService.js';
+import { fetchSoilEstimate } from './services/soilService.js';
+import {
+  fetchCropScapeHistory,
+  fetchEcostressData,
+  fetchFaoGaezSuitability,
+  searchUsdaAgDatasets
+} from './services/agroAtlasService.js';
+import { resolveEffectivePlotProfile } from './domain/soilProfileResolver.js';
+import { CROPS, buildAgroContext, evaluateCrop, generateAlerts, calculateIrrigation } from './domain/agronomyEngine.js';
 
-  <main>
-    <section id="dash" class="on">
-      <div class="hero">
-        <h1>🌱 AgroGuía</h1>
-        <p>Decisiones agrícolas con datos meteorológicos, climáticos y satelitales reales.</p>
-      </div>
-      <div id="status"></div>
-      <div id="dashBody"></div>
-    </section>
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => [...document.querySelectorAll(sel)];
 
-    <section id="loc">
-      <h2>Ubicación geográfica</h2>
+const state = {
+  loc: { ...CONFIG.DEFAULT_LOC },
+  wx: null,
+  clim: null,
+  era5: null,
+  topo: null,
+  nasaDaily: null,
+  soilEst: null,
+  cropScape: null,
+  ecostress: null,
+  faoGaez: null,
+  usdaCatalog: null,
+  charts: {},
+  map: null,
+  marker: null,
+  abortCtrl: null
+};
+
+const fmtVal = (val, unit, decimals = 1) => (val == null ? 'sin datos' : `${Number(val).toFixed(decimals)} ${unit}`);
+const escHtml = (str) =>
+  String(str).replace(/[&<>"]/g, (ch) => ({ '&': '&', '<': '<', '>': '>', '"': '"' }[ch]));
+const fmtWindDir = (deg) =>
+  deg == null ? 'sin datos' : `${['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][Math.round(deg / 45) % 8]} (${Math.round(deg)}°)`;
+
+function getPlots() {
+  try {
+    return JSON.parse(localStorage.getItem('agroguia.plots') || '[]');
+  } catch (_) {
+    return [];
+  }
+}
+
+function savePlots(list) {
+  try {
+    localStorage.setItem('agroguia.plots', JSON.stringify(list));
+  } catch (_) {}
+}
+
+function getActivePlot() {
+  try {
+    const activeId = localStorage.getItem('agroguia.active');
+    return getPlots().find((p) => p.id === activeId) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getResolvedProfile() {
+  return resolveEffectivePlotProfile(getActivePlot(), {
+    soilEst: state.soilEst,
+    nasaDaily: state.nasaDaily,
+    wx: state.wx,
+    cropScape: state.cropScape
+  });
+}
+
+const renderScoreBar = (score) =>
+  `<div class="bar"><i style="width:${score}%;background:${score >= 75 ? '#2e8b3d' : score >= 50 ? '#d99a1e' : '#c0392b'}"></i></div>`;
+
+function renderChart(canvasId, config) {
+  if (state.charts[canvasId]) {
+    state.charts[canvasId].destroy();
+  }
+  config.options = { ...(config.options || {}), maintainAspectRatio: false };
+  state.charts[canvasId] = new window.Chart($('#' + canvasId), config);
+}
+
+function navigateTo(sectionId) {
+  $$('section').forEach((sec) => sec.classList.toggle('on', sec.id === sectionId));
+  $$('nav button').forEach((btn) => btn.classList.toggle('on', btn.dataset.s === sectionId));
+  if (sectionId === 'loc') initMap();
+}
+
+$$('nav button').forEach((btn) => {
+  btn.onclick = () => navigateTo(btn.dataset.s);
+});
+
+$('#btnChangeLoc').onclick = () => navigateTo('loc');
+
+async function loadLocationData() {
+  if (state.abortCtrl) {
+    state.abortCtrl.abort();
+  }
+  state.abortCtrl = new AbortController();
+  const { signal } = state.abortCtrl;
+
+  const locDisplay = `${state.loc.name} (${state.loc.lat.toFixed(3)}, ${state.loc.lon.toFixed(3)})`;
+  $('#where').textContent = `📍 ${state.loc.name}`;
+  $('#plotActiveLoc').textContent = locDisplay;
+  $('#status').innerHTML = '<div class="load">Consultando fuentes meteorológicas, climáticas, satelitales y agroecológicas…</div>';
+
+  try {
+    const [wxRes, climRes, era5Res, topoRes, nasaDailyRes, soilRes, csRes, ecoRes, gaezRes, usdaRes] =
+      await Promise.allSettled([
+        fetchWeatherForecast(state.loc.lat, state.loc.lon, signal),
+        fetchNasaClimatology(state.loc.lat, state.loc.lon, signal),
+        fetchEra5History(state.loc.lat, state.loc.lon, signal),
+        fetchTopography(state.loc.lat, state.loc.lon, signal),
+        fetchNasaPowerDaily(state.loc.lat, state.loc.lon, signal),
+        fetchSoilEstimate(state.loc.lat, state.loc.lon, signal),
+        fetchCropScapeHistory(state.loc.lat, state.loc.lon, signal),
+        fetchEcostressData(state.loc.lat, state.loc.lon, signal),
+        fetchFaoGaezSuitability(state.loc.lat, state.loc.lon, signal),
+        searchUsdaAgDatasets('crop yield soil moisture', signal)
+      ]);
+
+    if (signal.aborted) return;
+
+    if (wxRes.status === 'fulfilled') {
+      state.wx = wxRes.value;
+      $('#status').innerHTML = '';
+    } else {
+      if (wxRes.reason?.name === 'AbortError') return;
+      state.wx = null;
+      $('#status').innerHTML = `<div class="err">No se pudo obtener el clima (${escHtml(wxRes.reason.message)}). Verificá tu conexión e intentá de nuevo.</div>`;
+    }
+
+    state.clim = climRes.status === 'fulfilled' ? climRes.value : null;
+    state.era5 = era5Res.status === 'fulfilled' ? era5Res.value : null;
+    state.topo = topoRes.status === 'fulfilled' ? topoRes.value : null;
+    state.nasaDaily = nasaDailyRes.status === 'fulfilled' ? nasaDailyRes.value : null;
+    state.soilEst = soilRes.status === 'fulfilled' ? soilRes.value : null;
+    state.cropScape = csRes.status === 'fulfilled' ? csRes.value : null;
+    state.ecostress = ecoRes.status === 'fulfilled' ? ecoRes.value : null;
+    state.faoGaez = gaezRes.status === 'fulfilled' ? gaezRes.value : null;
+    state.usdaCatalog = usdaRes.status === 'fulfilled' ? usdaRes.value : null;
+
+    renderAll();
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    $('#status').innerHTML = `<div class="err">Error inesperado: ${escHtml(err.message)}</div>`;
+  }
+}
+
+function ensureWeatherAvailable(container) {
+  if (!state.wx) {
+    container.innerHTML = '<div class="err">Sin datos meteorológicos disponibles para esta ubicación.</div>';
+    return false;
+  }
+  return true;
+}
+
+function renderAll() {
+  renderDashboard();
+  renderCrops();
+  renderCalendar();
+  renderIrrigation();
+  renderAlerts();
+  renderPlots();
+}
+
+const renderAlertListHtml = () =>
+  generateAlerts(state.wx)
+    .map((a) => `<div class="al ${a.l}"><b>${a.t}</b><br>${a.x}</div>`)
+    .join('');
+
+function renderDashboard() {
+  const el = $('#dashBody');
+  if (!ensureWeatherAvailable(el)) return;
+
+  const w = state.wx;
+  const c = w.current;
+  const d0 = w.daily[0];
+  const nd = state.nasaDaily?.summary;
+  const soil = state.soilEst;
+  const cs = state.cropScape;
+  const eco = state.ecostress;
+
+  const kpi = (title, value, sub) => `<div class="k"><small>${title}</small><b>${value}</b><small>${sub || ''}</small></div>`;
+  const cacheBadge = w.fromCache ? ' · (Caché local)' : '';
+
+  const cropScapeText = cs?.available
+    ? cs.history.map((h) => `${h.year}: ${h.cropName}`).join(' · ')
+    : cs?.reason || 'No disponible';
+
+  const ecostressText = eco?.available
+    ? `Dosel: ${eco.lstCelsius} °C (${eco.stressStatus})`
+    : eco?.reason || 'No disponible';
+
+  el.innerHTML = `
+    <p class="note">Fuente: ${w.source}${cacheBadge} · Actualizado: ${w.fetchedAt.toLocaleString('es-AR')} · Observación: ${escHtml(w.obsTime || 's/d')} · ${escHtml(state.loc.name)}</p>
+    <div class="grid">
+      ${kpi('Temperatura aire (2m)', fmtVal(c.temp, '°C'), 'Dato actual')}
+      ${kpi('Temp. superficial (Piel)', nd?.latestSkinTemp != null ? `${nd.latestSkinTemp} °C` : 'sin datos', 'NASA POWER (satelital)')}
+      ${kpi('NASA ECOSTRESS (70m)', eco?.available ? `${eco.lstCelsius} °C` : 'Sin proxy', ecostressText)}
+      ${kpi('Humedad relativa', fmtVal(c.rh, '%', 0), 'Dato actual')}
+      ${kpi('Precipitación actual', fmtVal(c.rain, 'mm'), 'Última hora')}
+      ${kpi('Lluvia anual (GPM)', nd ? `${nd.annualRainMm} mm` : 'sin datos', nd ? `Últimos 30d: ${nd.rain30dMm} mm · Racha seca: ${nd.maxDrySpell90d}d` : '')}
+      ${kpi('Viento', fmtVal(c.wind, 'km/h', 0), fmtWindDir(c.windDir))}
+      ${kpi('Radiación solar', fmtVal(c.radiation, 'W/m²', 0), 'Dato actual')}
+      ${kpi('Evapotranspiración (ET0)', fmtVal(d0.et0, 'mm'), 'Estimación de hoy')}
+      ${kpi('Humedad suelo (SMAP)', nd?.latestSoilRootPct != null ? `Raíz: ${nd.latestSoilRootPct}%` : 'sin datos', nd ? `Superf: ${nd.latestSoilTopPct}% · Tendencia: ${nd.rootTrend}` : '')}
+      ${kpi('Suelo estimado (SoilGrids)', soil?.textureClass ? `${soil.textureClass}` : 'no disponible', soil?.ph != null ? `pH ${soil.ph} · MO ${soil.organicMatterPct}% (Estimado)` : 'Sin datos edáficos')}
+      ${kpi('Altitud (SRTM)', state.topo?.elevationMeters != null ? `${state.topo.elevationMeters} m s.n.m.` : 'sin datos', state.topo ? `Pendiente: ${state.topo.slopePercent}% (${state.topo.terrainClass})` : '')}
+      ${kpi('Historial ERA5', state.era5 ? `${state.era5.period.totalDays} días` : 'no disponible', state.era5 ? state.era5.source : '')}
+      ${kpi('USDA CropScape', cs?.inCoverage ? 'En cobertura EE.UU.' : 'Fuera de EE.UU.', cropScapeText)}
+      ${kpi('USDA Ag Data Commons', state.usdaCatalog ? `${state.usdaCatalog.totalMatches} datasets` : 'sin datos', state.usdaCatalog?.datasets?.[0]?.title?.slice(0, 48) || '')}
+    </div>
+    <h3>Pronóstico 7 días</h3>
+    <div class="charts">
+      <div class="card"><div class="cv"><canvas id="cT"></canvas></div></div>
+      <div class="card"><div class="cv"><canvas id="cR"></canvas></div></div>
+    </div>
+    <div class="card tw">
+      <table>
+        <tr><th>Día</th><th>Mín</th><th>Máx</th><th>Lluvia</th><th>ET0</th><th>Viento máx</th></tr>
+        ${w.daily
+          .map(
+            (d) =>
+              `<tr><td>${d.date}</td><td>${fmtVal(d.tmin, '°C')}</td><td>${fmtVal(d.tmax, '°C')}</td><td>${fmtVal(d.rain, 'mm')}</td><td>${fmtVal(d.et0, 'mm')}</td><td>${fmtVal(d.windMax, 'km/h', 0)}</td></tr>`
+          )
+          .join('')}
+      </table>
+    </div>
+    <h3>Alertas</h3>
+    ${renderAlertListHtml()}
+    <h3>Promedios históricos</h3>
+    ${
+      state.clim
+        ? `<div class="card"><div class="cv"><canvas id="cH"></canvas></div></div><p class="note">Fuente: ${state.clim.source}. Son promedios históricos, no datos actuales.</p>`
+        : '<p class="note">Climatología NASA POWER no disponible por el momento.</p>'
+    }
+  `;
+
+  const labels = w.daily.map((d) => d.date.slice(5));
+  renderChart('cT', {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Máx °C', data: w.daily.map((d) => d.tmax), borderColor: '#c0392b' },
+        { label: 'Mín °C', data: w.daily.map((d) => d.tmin), borderColor: '#2c6fbb' }
+      ]
+    },
+    options: { plugins: { title: { display: true, text: 'Temperatura (pronóstico)' } } }
+  });
+
+  renderChart('cR', {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Lluvia mm', data: w.daily.map((d) => d.rain), backgroundColor: '#4c8b3f' },
+        { label: 'ET0 mm', data: w.daily.map((d) => d.et0), backgroundColor: '#d9b45a' }
+      ]
+    },
+    options: { plugins: { title: { display: true, text: 'Precipitación y ET0 (pronóstico)' } } }
+  });
+
+  if (state.clim) {
+    renderChart('cH', {
+      type: 'bar',
+      data: {
+        labels: MONTH_NAMES,
+        datasets: [
+          { type: 'line', label: 'Temp. media °C', data: state.clim.t2m, borderColor: '#c0392b', yAxisID: 'y' },
+          { label: 'Lluvia mm/día', data: state.clim.rain, backgroundColor: '#4c8b3f88', yAxisID: 'y1' }
+        ]
+      },
+      options: { scales: { y1: { position: 'right', grid: { drawOnChartArea: false } } } }
+    });
+  }
+}
+
+function renderAlerts() {
+  const el = $('#alertBody');
+  if (ensureWeatherAvailable(el)) {
+    el.innerHTML =
+      renderAlertListHtml() +
+      '<p class="note">Orientativas, basadas en el pronóstico de Open-Meteo. Consultá el servicio meteorológico oficial de tu país para avisos oficiales.</p>';
+  }
+}
+
+function renderCrops() {
+  const el = $('#cropsBody');
+  if (!ensureWeatherAvailable(el)) return;
+
+  const profile = getResolvedProfile();
+  // Adaptamos el perfil resuelto (medido + estimado) para el motor actual
+  const effectivePlotForEngine = {
+    soil: profile.fields.soilTexture.value,
+    ph: profile.fields.ph.value,
+    water: profile.fields.waterRegime.value
+  };
+
+  const ctx = buildAgroContext(state.wx, effectivePlotForEngine);
+  const ranked = CROPS.map((c) => ({ c, e: evaluateCrop(c, ctx) })).sort((a, b) => b.e.score - a.e.score);
+
+  const missingHtml = profile.missingImpactNotes.length
+    ? `<div class="warn-box">
+        <strong>ℹ️ Datos faltantes en esta evaluación (Completitud del perfil: ${profile.completenessPct}%):</strong>
+        <ul>${profile.missingImpactNotes.map((m) => `<li><b>${m.field}:</b> ${m.impact}</li>`).join('')}</ul>
+       </div>`
+    : '';
+
+  el.innerHTML = `
+    <p class="note">Evaluación activa: <b>${escHtml(profile.plotName)}</b> · Completitud de datos edáficos: <b>${profile.completenessPct}%</b>. Orientativo; sin garantía de rendimiento.</p>
+    ${missingHtml}
+    <div class="grid big" style="margin-top:12px">
+      ${ranked
+        .map(
+          ({ c, e }) => `
+        <div class="card">
+          <h3>${c.i} ${c.n}</h3>
+          <span class="tag ${e.cls[1]}">${e.cls[0]}</span> <b>${e.score}/100</b>
+          ${renderScoreBar(e.score)}
+          ${e.capped ? '<p class="note">⚠ Un factor crítico limita el índice.</p>' : ''}
+          <ul>${e.f.map((f) => `<li><b>${f.k}</b> (${f.s}): ${f.m}</li>`).join('')}</ul>
+          <small class="note">Óptimo ${c.topt.join('–')} °C · mín ${c.tmin} / máx ${c.tmax} °C · germinación ${c.germ} · ciclo ${c.cycle} d · agua ${c.water} · suelo ${c.soil.join('/')} · pH ${c.ph.join('–')} · heladas ${c.frost} · radiación ${c.rad}</small>
+        </div>`
+        )
+        .join('')}
+    </div>
+  `;
+}
+
+const cropOptionsHtml = CROPS.map((c, idx) => `<option value="${idx}">${c.i} ${c.n}</option>`).join('');
+$('#calCrop').innerHTML = cropOptionsHtml;
+$('#irrCrop').innerHTML = cropOptionsHtml;
+['#calCrop', '#irrCrop', '#irrStage'].forEach((sel) => {
+  $(sel).onchange = () => {
+    renderCalendar();
+    renderIrrigation();
+  };
+});
+
+function renderCalendar() {
+  const crop = CROPS[$('#calCrop').value];
+  const cells = Array(12).fill('');
+  const s0 = crop.sow[0] - 1;
+  const durationMonths = Math.ceil(crop.cycle / 30);
+  const labels = { S: 'Siembra', C: 'Crecimiento', H: 'Cosecha' };
+
+  for (let i = 0; i <= durationMonths; i++) {
+    cells[(s0 + i) % 12] = i === durationMonths ? 'H' : 'C';
+  }
+  crop.sow.forEach((m) => {
+    cells[m - 1] = 'S';
+  });
+
+  $('#calBody').innerHTML = `
+    <div class="card tw">
+      <table>
+        <tr>${MONTH_NAMES.map((m) => `<th>${m}</th>`).join('')}</tr>
+        <tr>${cells.map((code) => `<td class="${code}">${code ? labels[code] : ''}</td>`).join('')}</tr>
+      </table>
+      <p>Germinación estimada: ${crop.germ}. Ciclo aprox.: ${crop.cycle} días. Fertilización: en crecimiento inicial según análisis de suelo. Riego: ver sección Riego.</p>
+      <p class="note">Fechas orientativas para hemisferio sur.</p>
+    </div>
+  `;
+}
+
+function renderIrrigation() {
+  const el = $('#irrBody');
+  if (!ensureWeatherAvailable(el)) return;
+  const res = calculateIrrigation(CROPS[$('#irrCrop').value], state.wx, Number($('#irrStage').value));
+  el.innerHTML = `
+    <div class="card">
+      <span class="tag ${res.l}">${res.t}</span>
+      <ul>${res.why.map((line) => `<li>${line}</li>`).join('')}</ul>
+      <p class="note">No se indican láminas de riego: faltan datos de suelo, sistema y eficiencia.</p>
+    </div>
+  `;
+}
+
+function renderBadge(status) {
+  if (status === 'measured') return '<span class="src-badge src-measured">Medido</span>';
+  if (status === 'estimated') return '<span class="src-badge src-estimated">Estimado externo</span>';
+  return '<span class="src-badge src-missing">Faltante</span>';
+}
+
+function renderPlots() {
+  const profile = getResolvedProfile();
+  const f = profile.fields;
+
+  // Resumen en tiempo real del perfil resuelto (medido + estimado + faltante)
+  $('#effectiveSoilSummary').innerHTML = `
+    <div class="card">
+      <h3>Perfil efectivo utilizado para recomendaciones (${profile.completenessPct}% completo)</h3>
+      <p class="note">Origen activo: <b>${escHtml(profile.plotName)}</b></p>
+      <ul>
+        <li><b>Textura del suelo:</b> ${f.soilTexture.value ? escHtml(f.soilTexture.value) : 'No disponible'} ${renderBadge(f.soilTexture.status)} <small class="note">(${escHtml(f.soilTexture.sourceLabel)})</small></li>
+        <li><b>pH del suelo:</b> ${f.ph.value != null ? f.ph.value : 'No disponible'} ${renderBadge(f.ph.status)} <small class="note">(${escHtml(f.ph.sourceLabel)})</small></li>
+        <li><b>Materia orgánica:</b> ${f.organicMatter.value != null ? `${f.organicMatter.value} %` : 'No disponible'} ${renderBadge(f.organicMatter.status)} <small class="note">(${escHtml(f.organicMatter.sourceLabel)})</small></li>
+        <li><b>Humedad del suelo:</b> ${f.soilMoisture.value != null ? `${f.soilMoisture.value} %` : 'No disponible'} ${renderBadge(f.soilMoisture.status)} <small class="note">(${escHtml(f.soilMoisture.sourceLabel)})</small></li>
+        <li><b>Cultivos anteriores:</b> ${f.previousCrop.value ? escHtml(f.previousCrop.value) : 'No disponible'} ${renderBadge(f.previousCrop.status)} <small class="note">(${escHtml(f.previousCrop.sourceLabel)})</small></li>
+        <li><b>Disponibilidad hídrica:</b> ${f.waterRegime.value ? escHtml(f.waterRegime.value) : 'No especificado'} ${renderBadge(f.waterRegime.status)} <small class="note">(${escHtml(f.waterRegime.sourceLabel)})</small></li>
+      </ul>
+      ${
+        profile.missingImpactNotes.length
+          ? `<div class="warn-box">
+              <strong>⚠️ Cómo afectan los datos faltantes a la precisión:</strong>
+              <ul>${profile.missingImpactNotes.map((m) => `<li><b>${m.field}:</b> ${m.impact}</li>`).join('')}</ul>
+             </div>`
+          : '<p class="note" style="color:#166534">✔ Perfil completo: todas las variables edáficas están cubiertas.</p>'
+      }
+    </div>
+  `;
+
+  // Listado de configuraciones de lote guardadas por el usuario
+  const list = getPlots();
+  const activeId = localStorage.getItem('agroguia.active');
+  $('#plotList').innerHTML = list.length
+    ? list
+        .map(
+          (p) => `
       <div class="card">
-        <div class="row">
-          <input id="q" placeholder="Buscar localidad o región…">
-          <button id="qb">Buscar</button>
-          <button id="gps">Usar mi ubicación</button>
-          <select id="prov"></select>
+        <h3>${escHtml(p.name)}</h3>
+        <small>
+          ${p.area ? `Superficie: ${escHtml(p.area)} ha · ` : ''}Suelo: ${escHtml(p.soil || 'auto-estimar')}<br>
+          pH: ${escHtml(p.ph || 'auto')} · MO: ${escHtml(p.om ? p.om + '%' : 'auto')} · Humedad: ${escHtml(p.moist ? p.moist + '%' : 'auto')}<br>
+          Agua: ${escHtml(p.water || 'no especificado')} · Anteriores: ${escHtml(p.prev || 'auto')}
+        </small>
+        <div class="row" style="margin-top:8px">
+          <button data-a="${p.id}">${p.id === activeId ? '✔ Activo' : 'Usar este perfil'}</button>
+          <button data-d="${p.id}" style="background:#c0392b">Borrar</button>
         </div>
-        <div id="res"></div>
-        <div class="row">
-          <label>Lat <input id="lat" size="9"></label>
-          <label>Lon <input id="lon" size="9"></label>
-          <button id="go">Consultar</button>
-        </div>
-      </div>
-      <div id="map"></div>
-      <p class="note">Hacé clic en el mapa para elegir el punto exacto de análisis.</p>
-    </section>
+      </div>`
+        )
+        .join('')
+    : '<p class="note">No guardaste perfiles personalizados aún; el sistema está usando automáticamente los datos satelitales y del mapa.</p>';
 
-    <section id="crops">
-      <h2>¿Qué puedo plantar?</h2>
-      <div id="cropsBody"></div>
-    </section>
+  $$('[data-a]').forEach((btn) => {
+    btn.onclick = () => {
+      localStorage.setItem('agroguia.active', btn.dataset.a);
+      renderPlots();
+      if (state.wx) renderCrops();
+    };
+  });
 
-    <section id="cal">
-      <h2>Calendario agrícola</h2>
-      <div class="row">
-        <select id="calCrop"></select>
-      </div>
-      <div id="calBody"></div>
-    </section>
+  $$('[data-d]').forEach((btn) => {
+    btn.onclick = () => {
+      if (localStorage.getItem('agroguia.active') === btn.dataset.d) {
+        localStorage.removeItem('agroguia.active');
+      }
+      savePlots(getPlots().filter((p) => p.id !== btn.dataset.d));
+      renderPlots();
+      if (state.wx) renderCrops();
+    };
+  });
+}
 
-    <section id="plots">
-      <h2>Características del terreno y suelo</h2>
-      <div class="info-banner">
-        <div>
-          <strong>📍 Ubicación vinculada:</strong> <span id="plotActiveLoc">San Luis, Argentina</span>
-          <div class="note">Todos los campos abajo son opcionales. Si no conocés un dato, usaremos estimaciones satelitales o evaluaremos con las variables disponibles.</div>
-        </div>
-        <button type="button" class="secondary" id="btnChangeLoc">Cambiar en mapa</button>
-      </div>
+$('#pf').onsubmit = (e) => {
+  e.preventDefault();
+  const raw = Object.fromEntries(new FormData(e.target));
+  const currentCount = getPlots().length + 1;
+  const entry = {
+    id: String(Date.now()),
+    name: raw.name && raw.name.trim() ? raw.name.trim() : `Lote #${currentCount} (${state.loc.name.split(',')[0]})`,
+    area: raw.area || '',
+    soil: raw.soil || '',
+    ph: raw.ph || '',
+    om: raw.om || '',
+    moist: raw.moist || '',
+    water: raw.water || '',
+    prev: raw.prev || ''
+  };
+  savePlots([...getPlots(), entry]);
+  localStorage.setItem('agroguia.active', entry.id);
+  e.target.reset();
+  renderPlots();
+  if (state.wx) renderCrops();
+};
 
-      <div class="card">
-        <form id="pf" class="grid">
-          <div class="field-group">
-            <label>Identificador del lote <span class="opt-tag">(opcional)</span></label>
-            <input name="name" placeholder="Ej: Lote Norte (auto si vacío)">
-          </div>
+function setLocation(name, lat, lon) {
+  state.loc = { name, lat: Number(lat), lon: Number(lon) };
+  $('#lat').value = Number(lat).toFixed(4);
+  $('#lon').value = Number(lon).toFixed(4);
+  if (state.map) {
+    state.map.setView([lat, lon], 8);
+    state.marker.setLatLng([lat, lon]);
+  }
+  loadLocationData();
+}
 
-          <div class="field-group">
-            <label>Superficie (ha) <span class="opt-tag">(opcional)</span></label>
-            <input name="area" type="number" step="any" min="0" placeholder="Ej: 25">
-          </div>
+function initMap() {
+  if (!state.map) {
+    state.map = window.L.map('map').setView([state.loc.lat, state.loc.lon], 7);
+    window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(state.map);
+    state.marker = window.L.marker([state.loc.lat, state.loc.lon]).addTo(state.map);
+    state.map.on('click', (e) => {
+      setLocation(`Punto ${e.latlng.lat.toFixed(3)}, ${e.latlng.lng.toFixed(3)}`, e.latlng.lat, e.latlng.lng);
+    });
+  }
+  setTimeout(() => state.map.invalidateSize(), 50);
+}
 
-          <div class="field-group">
-            <label>Textura del suelo <span class="opt-tag">(opcional)</span></label>
-            <select name="soil">
-              <option value="">No lo sé (auto-estimar)</option>
-              <option value="franco">Franco</option>
-              <option value="franco-arenoso">Franco-arenoso</option>
-              <option value="arenoso">Arenoso</option>
-              <option value="arcilloso">Arcilloso</option>
-            </select>
-          </div>
+$('#prov').innerHTML =
+  '<option value="">Región de referencia…</option>' +
+  Object.keys(PRESET_REGIONS)
+    .map((region) => `<option value="${region}">${region}</option>`)
+    .join('');
 
-          <div class="field-group">
-            <label>pH del suelo <span class="opt-tag">(opcional)</span></label>
-            <input name="ph" type="number" step="0.1" min="3" max="11" placeholder="Ej: 6.5">
-          </div>
+$('#prov').onchange = (e) => {
+  const coords = PRESET_REGIONS[e.target.value];
+  if (coords) setLocation(e.target.value, coords[0], coords[1]);
+};
 
-          <div class="field-group">
-            <label>Materia orgánica (%) <span class="opt-tag">(opcional)</span></label>
-            <input name="om" type="number" step="0.1" min="0" max="100" placeholder="Ej: 2.8">
-          </div>
+$('#qb').onclick = async () => {
+  const query = $('#q').value.trim();
+  if (!query) return;
+  $('#res').innerHTML = '<div class="load">Buscando…</div>';
+  try {
+    const results = await searchLocations(query);
+    $('#res').innerHTML = results.length
+      ? `<ul class="res">${results.map((p, idx) => `<li data-i="${idx}">📍 ${escHtml(p.name)}</li>`).join('')}</ul>`
+      : '<p class="note">Sin resultados.</p>';
+    $$('#res li').forEach((li) => {
+      li.onclick = () => {
+        const chosen = results[li.dataset.i];
+        setLocation(chosen.name, chosen.lat, chosen.lon);
+        $('#res').innerHTML = '';
+      };
+    });
+  } catch (err) {
+    $('#res').innerHTML = `<div class="err">Error de búsqueda: ${escHtml(err.message)}</div>`;
+  }
+};
 
-          <div class="field-group">
-            <label>Humedad del suelo (%) <span class="opt-tag">(opcional)</span></label>
-            <input name="moist" type="number" step="any" min="0" max="100" placeholder="Ej: 22">
-          </div>
+$('#q').onkeydown = (e) => {
+  if (e.key === 'Enter') $('#qb').click();
+};
 
-          <div class="field-group">
-            <label>Disponibilidad hídrica <span class="opt-tag">(opcional)</span></label>
-            <select name="water">
-              <option value="">No especificado</option>
-              <option value="riego">Con riego</option>
-              <option value="secano">Solo lluvia (secano)</option>
-              <option value="escasa">Agua escasa</option>
-            </select>
-          </div>
+$('#gps').onclick = () => {
+  if (!navigator.geolocation) {
+    alert('Tu navegador no soporta geolocalización.');
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => setLocation('Mi ubicación', pos.coords.latitude, pos.coords.longitude),
+    () => alert('No se concedió el permiso de ubicación.')
+  );
+};
 
-          <div class="field-group">
-            <label>Cultivos anteriores <span class="opt-tag">(opcional)</span></label>
-            <input name="prev" placeholder="Ej: Maíz, Soja">
-          </div>
+$('#go').onclick = () => {
+  const lat = parseFloat($('#lat').value);
+  const lon = parseFloat($('#lon').value);
+  if (isNaN(lat) || isNaN(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    alert('Coordenadas inválidas.');
+    return;
+  }
+  setLocation(`Punto ${lat.toFixed(3)}, ${lon.toFixed(3)}`, lat, lon);
+};
 
-          <div class="field-group" style="justify-content: flex-end;">
-            <button type="submit">Guardar configuración</button>
-          </div>
-        </form>
-      </div>
-
-      <div id="effectiveSoilSummary"></div>
-      <div id="plotList" class="grid"></div>
-    </section>
-
-    <section id="irr">
-      <h2>Recomendaciones de riego</h2>
-      <div class="row">
-        <select id="irrCrop"></select>
-        <select id="irrStage">
-          <option value=".4">Inicial</option>
-          <option value=".75" selected>Desarrollo</option>
-          <option value="1">Media (floración)</option>
-          <option value=".7">Final</option>
-        </select>
-      </div>
-      <div id="irrBody"></div>
-    </section>
-
-    <section id="alerts">
-      <h2>Alertas y riesgos</h2>
-      <div id="alertBody"></div>
-    </section>
-
-    <footer>
-      Datos: Open-Meteo (ERA5/SRTM) · NASA POWER (GPM/SMAP) · ISRIC SoilGrids · USDA · OpenStreetMap. Información orientativa; no garantiza rendimientos.
-    </footer>
-  </main>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-  <script type="module" src="./js/main.js"></script>
-</body>
-</html>
+$('#lat').value = state.loc.lat;
+$('#lon').value = state.loc.lon;
+renderCalendar();
+renderPlots();
+loadLocationData();
