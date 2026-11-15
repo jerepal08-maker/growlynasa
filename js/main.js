@@ -1,5 +1,7 @@
 import { CONFIG, MONTH_NAMES, PRESET_REGIONS } from './config.js';
 import { searchLocations, fetchWeatherForecast, fetchNasaClimatology } from './services/weatherService.js';
+import { fetchEra5History } from './services/era5Service.js';
+import { fetchTopography } from './services/topographyService.js';
 import { CROPS, buildAgroContext, evaluateCrop, generateAlerts, calculateIrrigation } from './domain/agronomyEngine.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -9,6 +11,8 @@ const state = {
   loc: { ...CONFIG.DEFAULT_LOC },
   wx: null,
   clim: null,
+  era5: null,
+  topo: null,
   charts: {},
   map: null,
   marker: null,
@@ -73,12 +77,14 @@ async function loadLocationData() {
   const { signal } = state.abortCtrl;
 
   $('#where').textContent = `📍 ${state.loc.name}`;
-  $('#status').innerHTML = '<div class="load">Cargando datos meteorológicos y climáticos…</div>';
+  $('#status').innerHTML = '<div class="load">Cargando datos meteorológicos, climáticos y satelitales…</div>';
 
   try {
-    const [wxResult, climResult] = await Promise.allSettled([
+    const [wxResult, climResult, era5Result, topoResult] = await Promise.allSettled([
       fetchWeatherForecast(state.loc.lat, state.loc.lon, signal),
-      fetchNasaClimatology(state.loc.lat, state.loc.lon, signal)
+      fetchNasaClimatology(state.loc.lat, state.loc.lon, signal),
+      fetchEra5History(state.loc.lat, state.loc.lon, signal),
+      fetchTopography(state.loc.lat, state.loc.lon, signal)
     ]);
 
     if (signal.aborted) return;
@@ -93,6 +99,8 @@ async function loadLocationData() {
     }
 
     state.clim = climResult.status === 'fulfilled' ? climResult.value : null;
+    state.era5 = era5Result.status === 'fulfilled' ? era5Result.value : null;
+    state.topo = topoResult.status === 'fulfilled' ? topoResult.value : null;
     renderAll();
   } catch (err) {
     if (err.name === 'AbortError') return;
@@ -142,6 +150,8 @@ function renderDashboard() {
       ${kpi('Radiación solar', fmtVal(c.radiation, 'W/m²', 0), 'Dato actual')}
       ${kpi('Evapotranspiración (ET0)', fmtVal(d0.et0, 'mm'), 'Estimación de hoy')}
       ${kpi('Humedad del suelo', w.soilMoisture == null ? 'sin datos' : `${(w.soilMoisture * 100).toFixed(0)} %`, 'Estimación 3–9 cm')}
+      ${kpi('Altitud (SRTM)', state.topo?.elevationMeters != null ? `${state.topo.elevationMeters} m s.n.m.` : 'sin datos', state.topo ? `Pendiente: ${state.topo.slopePercent}% (${state.topo.terrainClass})` : '')}
+      ${kpi('Historial ERA5', state.era5 ? `${state.era5.period.totalDays} días` : 'no disponible', state.era5 ? state.era5.source : '')}
     </div>
     <h3>Pronóstico 7 días</h3>
     <div class="charts">
