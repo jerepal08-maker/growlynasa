@@ -4,6 +4,7 @@ import { fetchEra5History } from './services/era5Service.js';
 import { fetchTopography } from './services/topographyService.js';
 import { fetchNasaPowerDaily } from './services/nasaPowerDailyService.js';
 import { fetchSoilEstimate } from './services/soilService.js';
+import { fetchUsdaAmsMarketDemand } from './services/marketDemandService.js';
 import {
   fetchCropScapeHistory,
   fetchEcostressData,
@@ -21,6 +22,7 @@ import {
   calculateIrrigation
 } from './domain/agronomyEngine.js';
 import { renderGaussianChart, renderAnnualHydrologyChart, renderAgroPhysicsChart } from './ui/chartsView.js';
+import { downloadCropCardPng, downloadSummaryCardPng } from './ui/cardExporter.js';
 import {
   t,
   getLang,
@@ -35,6 +37,9 @@ import {
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
+const PLOTS_KEY = 'agrovision.plots';
+const ACTIVE_KEY = 'agrovision.active';
+
 const state = {
   loc: { ...CONFIG.DEFAULT_LOC },
   wx: null,
@@ -43,11 +48,15 @@ const state = {
   topo: null,
   nasaDaily: null,
   soilEst: null,
+  marketDemand: null,
   cropScape: null,
   ecostress: null,
   faoGaez: null,
   usdaCatalog: null,
   agroPhysics: null,
+  rankedCrops: [],
+  cropSearch: '',
+  cropFilter: 'all',
   gaussianMode: 'all_curves',
   irrStageFactor: 0.75,
   charts: {},
@@ -67,7 +76,8 @@ const fmtWindDir = (deg) => {
 
 function getPlots() {
   try {
-    return JSON.parse(localStorage.getItem('agroguia.plots') || '[]');
+    const raw = localStorage.getItem(PLOTS_KEY) || localStorage.getItem('agroguia.plots') || '[]';
+    return JSON.parse(raw);
   } catch (_) {
     return [];
   }
@@ -75,13 +85,13 @@ function getPlots() {
 
 function savePlots(list) {
   try {
-    localStorage.setItem('agroguia.plots', JSON.stringify(list));
+    localStorage.setItem(PLOTS_KEY, JSON.stringify(list));
   } catch (_) {}
 }
 
 function getActivePlot() {
   try {
-    const activeId = localStorage.getItem('agroguia.active');
+    const activeId = localStorage.getItem(ACTIVE_KEY) || localStorage.getItem('agroguia.active');
     return getPlots().find((p) => p.id === activeId) || null;
   } catch (_) {
     return null;
@@ -121,6 +131,20 @@ $$('[data-lang]').forEach((btn) => {
 if ($('#btnChangeLoc')) $('#btnChangeLoc').onclick = () => navigateTo('loc');
 if ($('#heroChangeLoc')) $('#heroChangeLoc').onclick = () => navigateTo('loc');
 if ($('#heroEditSoil')) $('#heroEditSoil').onclick = () => navigateTo('plots');
+if ($('#heroDownloadSummary')) {
+  $('#heroDownloadSummary').onclick = () => {
+    if (!state.wx) return;
+    downloadSummaryCardPng({
+      loc: state.loc,
+      wx: state.wx,
+      nasaDaily: state.nasaDaily,
+      topo: state.topo,
+      profile: getResolvedProfile(),
+      agroPhysics: state.agroPhysics,
+      rankedCrops: state.rankedCrops
+    });
+  };
+}
 
 async function loadLocationData() {
   if (state.abortCtrl) state.abortCtrl.abort();
@@ -133,7 +157,7 @@ async function loadLocationData() {
   $('#status').innerHTML = `<div class="load">${escHtml(t('loadingData'))}</div>`;
 
   try {
-    const [wxRes, climRes, era5Res, topoRes, nasaDailyRes, soilRes, csRes, ecoRes, gaezRes, usdaRes] =
+    const [wxRes, climRes, era5Res, topoRes, nasaDailyRes, soilRes, mktRes, csRes, ecoRes, gaezRes, usdaRes] =
       await Promise.allSettled([
         fetchWeatherForecast(state.loc.lat, state.loc.lon, signal),
         fetchNasaClimatology(state.loc.lat, state.loc.lon, signal),
@@ -141,6 +165,7 @@ async function loadLocationData() {
         fetchTopography(state.loc.lat, state.loc.lon, signal),
         fetchNasaPowerDaily(state.loc.lat, state.loc.lon, signal),
         fetchSoilEstimate(state.loc.lat, state.loc.lon, signal),
+        fetchUsdaAmsMarketDemand(signal),
         fetchCropScapeHistory(state.loc.lat, state.loc.lon, signal),
         fetchEcostressData(state.loc.lat, state.loc.lon, signal),
         fetchFaoGaezSuitability(state.loc.lat, state.loc.lon, signal),
@@ -163,6 +188,7 @@ async function loadLocationData() {
     state.topo = topoRes.status === 'fulfilled' ? topoRes.value : null;
     state.nasaDaily = nasaDailyRes.status === 'fulfilled' ? nasaDailyRes.value : null;
     state.soilEst = soilRes.status === 'fulfilled' ? soilRes.value : null;
+    state.marketDemand = mktRes.status === 'fulfilled' ? mktRes.value : null;
     state.cropScape = csRes.status === 'fulfilled' ? csRes.value : null;
     state.ecostress = ecoRes.status === 'fulfilled' ? ecoRes.value : null;
     state.faoGaez = gaezRes.status === 'fulfilled' ? gaezRes.value : null;
@@ -237,6 +263,119 @@ function translateFrostLevel(raw) {
   return { bajo: 'Low', moderado: 'Moderate', alto: 'High' }[raw] || raw;
 }
 
+function renderFilteredCropsGrid() {
+  const container = $('#cropsGridContainer');
+  if (!container) return;
+
+  const isEn = getLang() === 'en';
+  const query = state.cropSearch.trim().toLowerCase();
+
+  const filtered = state.rankedCrops.filter(({ crop, evalRes }) => {
+    if (state.cropFilter === 'top' && evalRes.score < 75) return false;
+    if (state.cropFilter === 'high_demand' && (evalRes.marketProfile?.demandIndex || 0) < 82) return false;
+    if (query) {
+      const localName = getCropName(crop).toLowerCase();
+      const engName = crop.n.toLowerCase();
+      const sci = crop.scientific.toLowerCase();
+      const fam = crop.family.toLowerCase();
+      if (!localName.includes(query) && !engName.includes(query) && !sci.includes(query) && !fam.includes(query)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  if (!filtered.length) {
+    container.innerHTML = `<p class="note">${escHtml(t('noResults'))}</p>`;
+    return;
+  }
+
+  container.innerHTML = filtered
+    .map(({ crop, evalRes, irrRes }) => {
+      const mkt = evalRes.marketProfile;
+      const tierLabel = mkt
+        ? mkt.tier === 'high'
+          ? t('demandHigh')
+          : mkt.tier === 'moderate-high'
+          ? t('demandModHigh')
+          : t('demandMod')
+        : '';
+      const reportUrl = mkt
+        ? `https://www.ams.usda.gov/market-news/${mkt.reportSlug}`
+        : 'https://www.ams.usda.gov/market-news';
+
+      return `
+        <div class="card">
+          <div class="card-top-row">
+            <h3>${crop.i} ${escHtml(getCropName(crop))} <small class="note"><i>(${crop.scientific})</i></small></h3>
+            <button type="button" class="btn-card-dl" data-dl-crop="${crop.id}">${escHtml(t('btnDownloadCard'))}</button>
+          </div>
+          <span class="tag ${evalRes.classification.badge === 'warn-orange' ? 'mid' : evalRes.classification.badge}">${escHtml(evalRes.classification.label)}</span>
+          <b>${evalRes.score}/100</b>
+          ${renderScoreBar(evalRes.score)}
+          ${evalRes.cappedByLiebig ? `<p class="note">${escHtml(t('liebigCapNote'))}</p>` : ''}
+
+          ${
+            mkt
+              ? `<div class="market-box">
+                  <b>${escHtml(t('marketDemandTitle'))}</b> <b>${mkt.demandIndex}/100</b> (${escHtml(tierLabel)}) ·
+                  <a href="${reportUrl}" target="_blank" rel="noopener">USDA AMS ↗</a><br>
+                  <span>${escHtml(isEn ? mkt.channelEn : mkt.channelEs)}</span>
+                 </div>`
+              : ''
+          }
+
+          ${
+            evalRes.advantages.length
+              ? `<p style="margin:6px 0 2px;font-size:0.86rem"><b>${escHtml(t('advantagesTitle'))}</b></p><ul style="font-size:0.84rem;margin:2px 0 6px 18px">${evalRes.advantages
+                  .slice(0, 3)
+                  .map((a) => `<li>${escHtml(a)}</li>`)
+                  .join('')}</ul>`
+              : ''
+          }
+
+          ${
+            evalRes.limitingFactors.length
+              ? `<p style="margin:6px 0 2px;font-size:0.86rem;color:#8a1f13"><b>${escHtml(t('limitingTitle'))}</b></p><ul style="font-size:0.84rem;margin:2px 0 6px 18px">${evalRes.limitingFactors
+                  .map((lf) => `<li>${escHtml(lf)}</li>`)
+                  .join('')}</ul>`
+              : ''
+          }
+
+          <div class="irr-box">
+            <b>${escHtml(t('irr7dTitle'))}</b> <span class="tag ${irrRes.l}" style="font-size:0.72rem">${escHtml(irrRes.t)}</span>
+            <div class="note" style="margin-top:4px">${escHtml(irrRes.why[0])} ${escHtml(irrRes.why[1])}</div>
+          </div>
+
+          ${buildInlineCalendarTable(crop, state.loc.lat)}
+
+          <details style="margin-top:8px">
+            <summary style="cursor:pointer;font-size:0.83rem;color:#1f4d2b">${escHtml(t('auditSummary', { count: evalRes.criteria.length }))}</summary>
+            <ul style="font-size:0.8rem;margin-top:6px">
+              ${evalRes.criteria
+                .map((cr) => `<li><b>${escHtml(cr.label)}</b> [${t('weightWord')} ${cr.weight}% · ${t('scoreWord')} ${cr.score}/100]: ${escHtml(cr.detail)}</li>`)
+                .join('')}
+            </ul>
+          </details>
+        </div>`;
+    })
+    .join('');
+
+  $$('[data-dl-crop]').forEach((btn) => {
+    btn.onclick = () => {
+      const found = state.rankedCrops.find((item) => item.crop.id === btn.dataset.dlCrop);
+      if (!found) return;
+      downloadCropCardPng({
+        crop: found.crop,
+        evalRes: found.evalRes,
+        irrRes: found.irrRes,
+        loc: state.loc,
+        profile: getResolvedProfile()
+      });
+    };
+  });
+}
+
 function renderUnifiedDashboard() {
   const el = $('#dashBody');
   if (!state.wx) {
@@ -249,7 +388,6 @@ function renderUnifiedDashboard() {
   const c = w.current;
   const d0 = w.daily[0];
   const nd = state.nasaDaily?.summary;
-  const cs = state.cropScape;
   const eco = state.ecostress;
   const ap = state.agroPhysics;
   const profile = getResolvedProfile();
@@ -271,10 +409,11 @@ function renderUnifiedDashboard() {
     profile,
     ecostress: eco,
     faoGaez: state.faoGaez,
-    agroPhysics: ap
+    agroPhysics: ap,
+    marketDemand: state.marketDemand
   });
 
-  const rankedCrops = CROPS.map((crop) => ({
+  state.rankedCrops = CROPS.map((crop) => ({
     crop,
     evalRes: evaluateCropComprehensive(crop, ctx),
     irrRes: calculateIrrigation(crop, w, state.irrStageFactor)
@@ -290,12 +429,6 @@ function renderUnifiedDashboard() {
   const frostSub = ap?.frostRisk
     ? `${t('kpiHistorical')}: ${ap.frostRisk.annualFrostDays} d/${isEn ? 'yr' : 'año'}${ap.frostRisk.peakFrostMonths.length ? ` · ${t('kpiPeak')}: ${ap.frostRisk.peakFrostMonths[0]}` : ''}`
     : '';
-
-  const cropScapeSub = cs?.available
-    ? cs.history.map((h) => `${h.year}: ${h.cropName}`).join(' · ')
-    : isEn && !cs?.inCoverage
-    ? 'Outside US coverage (CONUS only)'
-    : cs?.reason || '';
 
   el.innerHTML = `
     <div class="info-banner">
@@ -338,7 +471,7 @@ function renderUnifiedDashboard() {
         ${kpi(t('kpiDaylight'), ap?.photoperiod ? `${ap.photoperiod.currentDaylightHours} h/d` : t('noData'), ap?.photoperiod ? `${t('kpiAnnualRange')}: ${ap.photoperiod.minDaylightHours}–${ap.photoperiod.maxDaylightHours} h` : '')}
         ${kpi(t('kpiFrostRisk'), ap?.frostRisk ? `${t('kpiLevel')}: ${translateFrostLevel(ap.frostRisk.immediateLevel)}` : t('noData'), frostSub)}
         ${kpi(t('kpiFreezeThaw'), ap?.freezeThaw?.available ? `${ap.freezeThaw.annualFreezeThawCycles} ${t('kpiCyclesYr')}` : t('noData'), ap?.freezeThaw?.available ? `${t('kpiSubZeroDays')}: ${ap.freezeThaw.annualSubZeroDays}/yr · ${t('kpiMaxSpell')}: ${ap.freezeThaw.maxSubZeroSpellDays}d` : '')}
-        ${kpi(t('kpiLandUse'), cs?.inCoverage ? (cs.available ? cs.history[0]?.cropName : t('kpiInUs')) : t('kpiOutsideUs'), cropScapeSub)}
+        ${kpi(t('kpiMarketSource'), `<a href="https://www.ams.usda.gov/market-news" target="_blank" rel="noopener" style="color:#1f4d2b;text-decoration:underline">USDA AMS ↗</a>`, t('kpiMarketSub'))}
       </div>
     </div>
 
@@ -376,6 +509,12 @@ function renderUnifiedDashboard() {
       <div class="block-header">
         <h2>${t('blkCropsTitle')}</h2>
         <div class="row" style="margin:0">
+          <input id="cropSearchInput" type="search" value="${escHtml(state.cropSearch)}" placeholder="${escHtml(t('cropSearchPlaceholder'))}">
+          <select id="cropFilterSel">
+            <option value="all" ${state.cropFilter === 'all' ? 'selected' : ''}>${t('cropFilterAll')}</option>
+            <option value="top" ${state.cropFilter === 'top' ? 'selected' : ''}>${t('cropFilterTop')}</option>
+            <option value="high_demand" ${state.cropFilter === 'high_demand' ? 'selected' : ''}>${t('cropFilterHighDemand')}</option>
+          </select>
           <label style="font-size:0.85rem"><b>${t('irrStageLabel')}</b>
             <select id="unifiedIrrStage">
               <option value="0.4" ${state.irrStageFactor === 0.4 ? 'selected' : ''}>${t('stageInitial')}</option>
@@ -392,55 +531,11 @@ function renderUnifiedDashboard() {
       </p>
       ${missingHtml}
 
-      <div class="grid big" style="margin-top:12px">
-        ${rankedCrops
-          .map(
-            ({ crop, evalRes, irrRes }) => `
-          <div class="card">
-            <h3>${crop.i} ${escHtml(getCropName(crop))} <small class="note"><i>(${crop.scientific})</i></small></h3>
-            <span class="tag ${evalRes.classification.badge === 'warn-orange' ? 'mid' : evalRes.classification.badge}">${escHtml(evalRes.classification.label)}</span>
-            <b>${evalRes.score}/100</b>
-            ${renderScoreBar(evalRes.score)}
-            ${evalRes.cappedByLiebig ? `<p class="note">${escHtml(t('liebigCapNote'))}</p>` : ''}
-
-            ${
-              evalRes.advantages.length
-                ? `<p style="margin:6px 0 2px;font-size:0.86rem"><b>${escHtml(t('advantagesTitle'))}</b></p><ul style="font-size:0.84rem;margin:2px 0 6px 18px">${evalRes.advantages
-                    .slice(0, 3)
-                    .map((a) => `<li>${escHtml(a)}</li>`)
-                    .join('')}</ul>`
-                : ''
-            }
-
-            ${
-              evalRes.limitingFactors.length
-                ? `<p style="margin:6px 0 2px;font-size:0.86rem;color:#8a1f13"><b>${escHtml(t('limitingTitle'))}</b></p><ul style="font-size:0.84rem;margin:2px 0 6px 18px">${evalRes.limitingFactors
-                    .map((lf) => `<li>${escHtml(lf)}</li>`)
-                    .join('')}</ul>`
-                : ''
-            }
-
-            <div class="irr-box">
-              <b>${escHtml(t('irr7dTitle'))}</b> <span class="tag ${irrRes.l}" style="font-size:0.72rem">${escHtml(irrRes.t)}</span>
-              <div class="note" style="margin-top:4px">${escHtml(irrRes.why[0])} ${escHtml(irrRes.why[1])}</div>
-            </div>
-
-            ${buildInlineCalendarTable(crop, state.loc.lat)}
-
-            <details style="margin-top:8px">
-              <summary style="cursor:pointer;font-size:0.83rem;color:#1f4d2b">${escHtml(t('auditSummary', { count: evalRes.criteria.length }))}</summary>
-              <ul style="font-size:0.8rem;margin-top:6px">
-                ${evalRes.criteria
-                  .map((cr) => `<li><b>${escHtml(cr.label)}</b> [${t('weightWord')} ${cr.weight}% · ${t('scoreWord')} ${cr.score}/100]: ${escHtml(cr.detail)}</li>`)
-                  .join('')}
-              </ul>
-            </details>
-          </div>`
-          )
-          .join('')}
-      </div>
+      <div id="cropsGridContainer" class="grid big" style="margin-top:12px"></div>
     </div>
   `;
+
+  renderFilteredCropsGrid();
 
   if (state.era5) {
     const gResult = renderGaussianChart($('#cGauss'), state.charts, state.era5, state.gaussianMode);
@@ -459,6 +554,18 @@ function renderUnifiedDashboard() {
   renderAnnualHydrologyChart($('#cHydro'), state.charts, state.era5, state.clim);
   renderAgroPhysicsChart($('#cPhysics'), state.charts, state.agroPhysics);
 
+  if ($('#cropSearchInput')) {
+    $('#cropSearchInput').oninput = (e) => {
+      state.cropSearch = e.target.value;
+      renderFilteredCropsGrid();
+    };
+  }
+  if ($('#cropFilterSel')) {
+    $('#cropFilterSel').onchange = (e) => {
+      state.cropFilter = e.target.value;
+      renderFilteredCropsGrid();
+    };
+  }
   if ($('#gaussModeSel')) {
     $('#gaussModeSel').onchange = (e) => {
       state.gaussianMode = e.target.value;
@@ -508,7 +615,7 @@ function renderPlots() {
   `;
 
   const list = getPlots();
-  const activeId = localStorage.getItem('agroguia.active');
+  const activeId = localStorage.getItem(ACTIVE_KEY) || localStorage.getItem('agroguia.active');
   $('#plotList').innerHTML = list.length
     ? list
         .map(
@@ -531,7 +638,7 @@ function renderPlots() {
 
   $$('[data-a]').forEach((btn) => {
     btn.onclick = () => {
-      localStorage.setItem('agroguia.active', btn.dataset.a);
+      localStorage.setItem(ACTIVE_KEY, btn.dataset.a);
       renderPlots();
       if (state.wx) renderUnifiedDashboard();
     };
@@ -539,7 +646,8 @@ function renderPlots() {
 
   $$('[data-d]').forEach((btn) => {
     btn.onclick = () => {
-      if (localStorage.getItem('agroguia.active') === btn.dataset.d) {
+      if ((localStorage.getItem(ACTIVE_KEY) || localStorage.getItem('agroguia.active')) === btn.dataset.d) {
+        localStorage.removeItem(ACTIVE_KEY);
         localStorage.removeItem('agroguia.active');
       }
       savePlots(getPlots().filter((p) => p.id !== btn.dataset.d));
@@ -565,7 +673,7 @@ $('#pf').onsubmit = (e) => {
     prev: raw.prev || ''
   };
   savePlots([...getPlots(), entry]);
-  localStorage.setItem('agroguia.active', entry.id);
+  localStorage.setItem(ACTIVE_KEY, entry.id);
   e.target.reset();
   renderPlots();
   if (state.wx) renderUnifiedDashboard();
@@ -655,7 +763,7 @@ $('#go').onclick = () => {
   setLocation(`Point ${lat.toFixed(3)}, ${lon.toFixed(3)}`, lat, lon);
 };
 
-// Inicialización con idioma Inglés por defecto (o preferencia guardada)
+// Inicialización AgroVision
 applyStaticTranslations();
 populatePresetRegions();
 $('#lat').value = state.loc.lat;
