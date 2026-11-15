@@ -11,7 +11,15 @@ import {
   searchUsdaAgDatasets
 } from './services/agroAtlasService.js';
 import { resolveEffectivePlotProfile } from './domain/soilProfileResolver.js';
-import { CROPS, buildAgroContext, evaluateCrop, generateAlerts, calculateIrrigation } from './domain/agronomyEngine.js';
+import { analyzePhotoperiod, analyzeFreezeThaw, analyzeFrostRisk } from './domain/agroPhysics.js';
+import {
+  CROPS,
+  getCropSowMonths,
+  buildComprehensiveContext,
+  evaluateCropComprehensive,
+  generateAlerts,
+  calculateIrrigation
+} from './domain/agronomyEngine.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -28,6 +36,7 @@ const state = {
   ecostress: null,
   faoGaez: null,
   usdaCatalog: null,
+  agroPhysics: null,
   charts: {},
   map: null,
   marker: null,
@@ -73,7 +82,7 @@ function getResolvedProfile() {
 }
 
 const renderScoreBar = (score) =>
-  `<div class="bar"><i style="width:${score}%;background:${score >= 75 ? '#2e8b3d' : score >= 50 ? '#d99a1e' : '#c0392b'}"></i></div>`;
+  `<div class="bar"><i style="width:${score}%;background:${score >= 75 ? '#2e8b3d' : score >= 55 ? '#d99a1e' : score >= 35 ? '#e67e22' : '#c0392b'}"></i></div>`;
 
 function renderChart(canvasId, config) {
   if (state.charts[canvasId]) {
@@ -93,7 +102,9 @@ $$('nav button').forEach((btn) => {
   btn.onclick = () => navigateTo(btn.dataset.s);
 });
 
-$('#btnChangeLoc').onclick = () => navigateTo('loc');
+if ($('#btnChangeLoc')) {
+  $('#btnChangeLoc').onclick = () => navigateTo('loc');
+}
 
 async function loadLocationData() {
   if (state.abortCtrl) {
@@ -104,7 +115,7 @@ async function loadLocationData() {
 
   const locDisplay = `${state.loc.name} (${state.loc.lat.toFixed(3)}, ${state.loc.lon.toFixed(3)})`;
   $('#where').textContent = `📍 ${state.loc.name}`;
-  $('#plotActiveLoc').textContent = locDisplay;
+  if ($('#plotActiveLoc')) $('#plotActiveLoc').textContent = locDisplay;
   $('#status').innerHTML = '<div class="load">Consultando fuentes meteorológicas, climáticas, satelitales y agroecológicas…</div>';
 
   try {
@@ -143,6 +154,19 @@ async function loadLocationData() {
     state.faoGaez = gaezRes.status === 'fulfilled' ? gaezRes.value : null;
     state.usdaCatalog = usdaRes.status === 'fulfilled' ? usdaRes.value : null;
 
+    // Calcular las 3 nuevas variables de física agroclimática
+    state.agroPhysics = {
+      photoperiod: analyzePhotoperiod(state.loc.lat, state.era5?.monthlySummary),
+      freezeThaw: analyzeFreezeThaw(state.era5),
+      frostRisk: analyzeFrostRisk({
+        lat: state.loc.lat,
+        wx: state.wx,
+        era5: state.era5,
+        nasaDaily: state.nasaDaily,
+        ecostress: state.ecostress
+      })
+    };
+
     renderAll();
   } catch (err) {
     if (err.name === 'AbortError') return;
@@ -168,7 +192,7 @@ function renderAll() {
 }
 
 const renderAlertListHtml = () =>
-  generateAlerts(state.wx)
+  generateAlerts(state.wx, state.agroPhysics)
     .map((a) => `<div class="al ${a.l}"><b>${a.t}</b><br>${a.x}</div>`)
     .join('');
 
@@ -183,6 +207,7 @@ function renderDashboard() {
   const soil = state.soilEst;
   const cs = state.cropScape;
   const eco = state.ecostress;
+  const ap = state.agroPhysics;
 
   const kpi = (title, value, sub) => `<div class="k"><small>${title}</small><b>${value}</b><small>${sub || ''}</small></div>`;
   const cacheBadge = w.fromCache ? ' · (Caché local)' : '';
@@ -195,11 +220,15 @@ function renderDashboard() {
     ? `Dosel: ${eco.lstCelsius} °C (${eco.stressStatus})`
     : eco?.reason || 'No disponible';
 
+  const frostSub = ap?.frostRisk
+    ? `Histórico: ${ap.frostRisk.annualFrostDays} días/año${ap.frostRisk.peakFrostMonths.length ? ' · Pico: ' + ap.frostRisk.peakFrostMonths[0] : ''}`
+    : '';
+
   el.innerHTML = `
     <p class="note">Fuente: ${w.source}${cacheBadge} · Actualizado: ${w.fetchedAt.toLocaleString('es-AR')} · Observación: ${escHtml(w.obsTime || 's/d')} · ${escHtml(state.loc.name)}</p>
     <div class="grid">
       ${kpi('Temperatura aire (2m)', fmtVal(c.temp, '°C'), 'Dato actual')}
-      ${kpi('Temp. superficial (Piel)', nd?.latestSkinTemp != null ? `${nd.latestSkinTemp} °C` : 'sin datos', 'NASA POWER (satelital)')}
+      ${kpi('Temp. superficial (Piel)', nd?.latestSkinTemp != null ? `${nd.latestSkinTemp} °C` : 'sin datos', 'NASA POWER (distinta al aire 2m)')}
       ${kpi('NASA ECOSTRESS (70m)', eco?.available ? `${eco.lstCelsius} °C` : 'Sin proxy', ecostressText)}
       ${kpi('Humedad relativa', fmtVal(c.rh, '%', 0), 'Dato actual')}
       ${kpi('Precipitación actual', fmtVal(c.rain, 'mm'), 'Última hora')}
@@ -210,9 +239,10 @@ function renderDashboard() {
       ${kpi('Humedad suelo (SMAP)', nd?.latestSoilRootPct != null ? `Raíz: ${nd.latestSoilRootPct}%` : 'sin datos', nd ? `Superf: ${nd.latestSoilTopPct}% · Tendencia: ${nd.rootTrend}` : '')}
       ${kpi('Suelo estimado (SoilGrids)', soil?.textureClass ? `${soil.textureClass}` : 'no disponible', soil?.ph != null ? `pH ${soil.ph} · MO ${soil.organicMatterPct}% (Estimado)` : 'Sin datos edáficos')}
       ${kpi('Altitud (SRTM)', state.topo?.elevationMeters != null ? `${state.topo.elevationMeters} m s.n.m.` : 'sin datos', state.topo ? `Pendiente: ${state.topo.slopePercent}% (${state.topo.terrainClass})` : '')}
-      ${kpi('Historial ERA5', state.era5 ? `${state.era5.period.totalDays} días` : 'no disponible', state.era5 ? state.era5.source : '')}
+      ${kpi('Horas de luz (Fotoperíodo)', ap?.photoperiod ? `${ap.photoperiod.currentDaylightHours} h/día` : 's/d', ap?.photoperiod ? `Rango anual: ${ap.photoperiod.minDaylightHours}–${ap.photoperiod.maxDaylightHours} h` : '')}
+      ${kpi('Congelación / Deshielo', ap?.freezeThaw?.available ? `${ap.freezeThaw.annualFreezeThawCycles} ciclos/año` : 's/d', ap?.freezeThaw?.available ? `Días <0°C: ${ap.freezeThaw.annualSubZeroDays}/año` : '')}
+      ${kpi('Riesgo de heladas', ap?.frostRisk ? `Nivel ${ap.frostRisk.immediateLevel}` : 's/d', frostSub)}
       ${kpi('USDA CropScape', cs?.inCoverage ? 'En cobertura EE.UU.' : 'Fuera de EE.UU.', cropScapeText)}
-      ${kpi('USDA Ag Data Commons', state.usdaCatalog ? `${state.usdaCatalog.totalMatches} datasets` : 'sin datos', state.usdaCatalog?.datasets?.[0]?.title?.slice(0, 48) || '')}
     </div>
     <h3>Pronóstico 7 días</h3>
     <div class="charts">
@@ -285,7 +315,7 @@ function renderAlerts() {
   if (ensureWeatherAvailable(el)) {
     el.innerHTML =
       renderAlertListHtml() +
-      '<p class="note">Orientativas, basadas en el pronóstico de Open-Meteo. Consultá el servicio meteorológico oficial de tu país para avisos oficiales.</p>';
+      '<p class="note">Orientativas, basadas en Open-Meteo y análisis histórico ERA5. Consultá el servicio meteorológico oficial de tu país para avisos oficiales.</p>';
   }
 }
 
@@ -294,37 +324,68 @@ function renderCrops() {
   if (!ensureWeatherAvailable(el)) return;
 
   const profile = getResolvedProfile();
-  // Adaptamos el perfil resuelto (medido + estimado) para el motor actual
-  const effectivePlotForEngine = {
-    soil: profile.fields.soilTexture.value,
-    ph: profile.fields.ph.value,
-    water: profile.fields.waterRegime.value
-  };
+  const ctx = buildComprehensiveContext({
+    lat: state.loc.lat,
+    wx: state.wx,
+    era5: state.era5,
+    nasaDaily: state.nasaDaily,
+    topo: state.topo,
+    profile,
+    ecostress: state.ecostress,
+    faoGaez: state.faoGaez,
+    agroPhysics: state.agroPhysics
+  });
 
-  const ctx = buildAgroContext(state.wx, effectivePlotForEngine);
-  const ranked = CROPS.map((c) => ({ c, e: evaluateCrop(c, ctx) })).sort((a, b) => b.e.score - a.e.score);
+  const ranked = CROPS.map((c) => ({ c, e: evaluateCropComprehensive(c, ctx) })).sort(
+    (a, b) => b.e.score - a.e.score
+  );
 
   const missingHtml = profile.missingImpactNotes.length
     ? `<div class="warn-box">
-        <strong>ℹ️ Datos faltantes en esta evaluación (Completitud del perfil: ${profile.completenessPct}%):</strong>
+        <strong>ℹ️ Transparencia de datos faltantes (Perfil edáfico: ${profile.completenessPct}%):</strong> El motor ajusta los pesos dinámicamente sin penalizar ni inventar valores.
         <ul>${profile.missingImpactNotes.map((m) => `<li><b>${m.field}:</b> ${m.impact}</li>`).join('')}</ul>
        </div>`
     : '';
 
   el.innerHTML = `
-    <p class="note">Evaluación activa: <b>${escHtml(profile.plotName)}</b> · Completitud de datos edáficos: <b>${profile.completenessPct}%</b>. Orientativo; sin garantía de rendimiento.</p>
+    <p class="note">Perfil activo: <b>${escHtml(profile.plotName)}</b> · Hemisferio: <b>${ctx.hemisphere === 'north' ? 'Norte' : 'Sur'}</b>. Modelo ponderado por fisiología agronómica (Hídrico 30%, Térmico/Heladas 30%, Suelo 20%, Topografía/Luz/Rotación 20%).</p>
     ${missingHtml}
     <div class="grid big" style="margin-top:12px">
       ${ranked
         .map(
           ({ c, e }) => `
         <div class="card">
-          <h3>${c.i} ${c.n}</h3>
-          <span class="tag ${e.cls[1]}">${e.cls[0]}</span> <b>${e.score}/100</b>
+          <h3>${c.i} ${c.n} <small class="note"><i>(${c.scientific})</i></small></h3>
+          <span class="tag ${e.classification.badge === 'warn-orange' ? 'mid' : e.classification.badge}">${e.classification.label}</span>
+          <b>${e.score}/100</b>
           ${renderScoreBar(e.score)}
-          ${e.capped ? '<p class="note">⚠ Un factor crítico limita el índice.</p>' : ''}
-          <ul>${e.f.map((f) => `<li><b>${f.k}</b> (${f.s}): ${f.m}</li>`).join('')}</ul>
-          <small class="note">Óptimo ${c.topt.join('–')} °C · mín ${c.tmin} / máx ${c.tmax} °C · germinación ${c.germ} · ciclo ${c.cycle} d · agua ${c.water} · suelo ${c.soil.join('/')} · pH ${c.ph.join('–')} · heladas ${c.frost} · radiación ${c.rad}</small>
+          ${e.cappedByLiebig ? '<p class="note">⚠ Limitado por factor crítico fisiológico (Ley de Liebig).</p>' : ''}
+
+          ${
+            e.advantages.length
+              ? `<p style="margin:6px 0 2px"><b>✔ Ventajas detectadas:</b></p><ul>${e.advantages
+                  .slice(0, 4)
+                  .map((a) => `<li>${escHtml(a)}</li>`)
+                  .join('')}</ul>`
+              : ''
+          }
+
+          ${
+            e.limitingFactors.length
+              ? `<p style="margin:6px 0 2px;color:#8a1f13"><b>⚠ Factores limitantes:</b></p><ul>${e.limitingFactors
+                  .map((lf) => `<li>${escHtml(lf)}</li>`)
+                  .join('')}</ul>`
+              : ''
+          }
+
+          <details style="margin-top:8px">
+            <summary style="cursor:pointer;font-size:0.85rem;color:#1f4d2b">Ver desglose completo de criterios (${e.criteria.length} evaluados)</summary>
+            <ul style="font-size:0.82rem;margin-top:6px">
+              ${e.criteria
+                .map((cr) => `<li><b>${cr.label}</b> [Peso ${cr.weight}% · Nota ${cr.score}/100]: ${escHtml(cr.detail)}</li>`)
+                .join('')}
+            </ul>
+          </details>
         </div>`
         )
         .join('')}
@@ -344,15 +405,17 @@ $('#irrCrop').innerHTML = cropOptionsHtml;
 
 function renderCalendar() {
   const crop = CROPS[$('#calCrop').value];
+  const sowMonths = getCropSowMonths(crop, state.loc.lat);
   const cells = Array(12).fill('');
-  const s0 = crop.sow[0] - 1;
+  const s0 = sowMonths[0] - 1;
   const durationMonths = Math.ceil(crop.cycle / 30);
   const labels = { S: 'Siembra', C: 'Crecimiento', H: 'Cosecha' };
+  const isNorth = Number(state.loc.lat) >= 0;
 
   for (let i = 0; i <= durationMonths; i++) {
     cells[(s0 + i) % 12] = i === durationMonths ? 'H' : 'C';
   }
-  crop.sow.forEach((m) => {
+  sowMonths.forEach((m) => {
     cells[m - 1] = 'S';
   });
 
@@ -362,8 +425,8 @@ function renderCalendar() {
         <tr>${MONTH_NAMES.map((m) => `<th>${m}</th>`).join('')}</tr>
         <tr>${cells.map((code) => `<td class="${code}">${code ? labels[code] : ''}</td>`).join('')}</tr>
       </table>
-      <p>Germinación estimada: ${crop.germ}. Ciclo aprox.: ${crop.cycle} días. Fertilización: en crecimiento inicial según análisis de suelo. Riego: ver sección Riego.</p>
-      <p class="note">Fechas orientativas para hemisferio sur.</p>
+      <p>Germinación estimada: ${crop.germ}. Ciclo aprox.: ${crop.cycle} días. Fotoperíodo: ${crop.photoperiodType} (${crop.daylightRange.join('–')} h).</p>
+      <p class="note">Calendario ajustado automáticamente al <b>Hemisferio ${isNorth ? 'Norte' : 'Sur'}</b> (${state.loc.name}).</p>
     </div>
   `;
 }
@@ -388,10 +451,10 @@ function renderBadge(status) {
 }
 
 function renderPlots() {
+  if (!$('#effectiveSoilSummary')) return;
   const profile = getResolvedProfile();
   const f = profile.fields;
 
-  // Resumen en tiempo real del perfil resuelto (medido + estimado + faltante)
   $('#effectiveSoilSummary').innerHTML = `
     <div class="card">
       <h3>Perfil efectivo utilizado para recomendaciones (${profile.completenessPct}% completo)</h3>
@@ -415,7 +478,6 @@ function renderPlots() {
     </div>
   `;
 
-  // Listado de configuraciones de lote guardadas por el usuario
   const list = getPlots();
   const activeId = localStorage.getItem('agroguia.active');
   $('#plotList').innerHTML = list.length
