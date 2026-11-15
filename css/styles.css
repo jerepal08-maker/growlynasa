@@ -1,0 +1,318 @@
+:root {
+  --g1: #1f4d2b;
+  --g2: #4c8b3f;
+  --bg: #faf7ef;
+  --bz: #efe6d2;
+  --text: #222222;
+  --muted: #666666;
+  --danger: #c0392b;
+  --warn: #d99a1e;
+  --ok: #2e8b3d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  min-height: 100vh;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+nav {
+  width: 220px;
+  background: var(--g1);
+  color: #fff;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  flex-shrink: 0;
+}
+
+.brand {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+nav button {
+  background: none;
+  border: 0;
+  color: #e6f0e2;
+  text-align: left;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+nav button.on,
+nav button:hover {
+  background: var(--g2);
+  color: #fff;
+}
+
+#where {
+  margin-top: auto;
+  opacity: 0.85;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+main {
+  flex: 1;
+  padding: 20px;
+  min-width: 0;
+}
+
+section {
+  display: none;
+}
+
+section.on {
+  display: block;
+}
+
+.hero {
+  background: linear-gradient(120deg, var(--g1), var(--g2));
+  color: #fff;
+  border-radius: 14px;
+  padding: 22px;
+  margin-bottom: 16px;
+}
+
+.hero h1 {
+  margin: 0 0 6px 0;
+}
+
+.hero p {
+  margin: 0;
+  opacity: 0.92;
+}
+
+.card,
+.k {
+  background: #fff;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  margin-bottom: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.big {
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+}
+
+.k b {
+  display: block;
+  font-size: 1.4rem;
+  color: var(--g1);
+  margin: 4px 0;
+}
+
+.k small,
+.note,
+footer {
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  align-items: center;
+}
+
+input,
+select,
+button {
+  padding: 8px 10px;
+  border: 1px solid #cdbf9f;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  background: #fff;
+}
+
+button {
+  background: var(--g2);
+  color: #fff;
+  border: 0;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(0.95);
+}
+
+#map {
+  height: 360px;
+  border-radius: 14px;
+  margin-bottom: 8px;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.cv {
+  position: relative;
+  height: 260px;
+}
+
+.bar {
+  height: 10px;
+  background: var(--bz);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+}
+
+.tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 99px;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.ok {
+  background: var(--ok);
+}
+
+.mid {
+  background: var(--warn);
+}
+
+.bad {
+  background: var(--danger);
+}
+
+.al {
+  border-left: 6px solid;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.al.hi {
+  border-color: var(--danger);
+}
+
+.al.me {
+  border-color: var(--warn);
+}
+
+.al.lo {
+  border-color: var(--ok);
+}
+
+.tw {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+td,
+th {
+  padding: 7px;
+  border-bottom: 1px solid #eee;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.S {
+  background: #7bc67b;
+}
+
+.C {
+  background: #cfe8b8;
+}
+
+.H {
+  background: #e5b347;
+}
+
+.err {
+  background: #fde8e6;
+  color: #8a1f13;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+
+.load {
+  padding: 10px;
+  color: #555;
+  font-style: italic;
+}
+
+ul.res {
+  list-style: none;
+  padding-left: 4px;
+  margin: 6px 0;
+}
+
+ul.res li {
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+ul.res li:hover {
+  background: var(--bg);
+}
+
+footer {
+  margin-top: 24px;
+  font-size: 0.8rem;
+  border-top: 1px solid #e2dac6;
+  padding-top: 12px;
+}
+
+@media (max-width: 700px) {
+  body {
+    flex-direction: column;
+  }
+
+  nav {
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    position: static;
+  }
+
+  #where,
+  .brand {
+    display: none;
+  }
+}
