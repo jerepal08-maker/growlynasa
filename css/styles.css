@@ -29,7 +29,7 @@ body {
   color: var(--text);
 }
 
-nav {
+body > nav {
   width: 230px;
   background: var(--g1);
   color: #fff;
@@ -49,7 +49,7 @@ nav {
   margin-bottom: 10px;
 }
 
-nav button {
+body > nav button {
   background: none;
   border: 0;
   color: #e6f0e2;
@@ -61,8 +61,8 @@ nav button {
   transition: background 0.15s ease;
 }
 
-nav button.on,
-nav button:hover {
+body > nav button.on,
+body > nav button:hover {
   background: var(--g2);
   color: #fff;
 }
@@ -117,14 +117,18 @@ section.on {
 
 .quick-nav {
   display: flex;
+  flex-direction: row;
   gap: 8px;
   flex-wrap: wrap;
+  width: 100%;
+  height: auto;
   margin-bottom: 16px;
   position: sticky;
   top: 0;
   z-index: 20;
   background: var(--bg);
-  padding: 8px 0;
+  padding: 10px 0;
+  border-bottom: 1px solid #e6decb;
 }
 
 .quick-nav a {
@@ -144,7 +148,7 @@ section.on {
 
 .dash-block {
   margin-bottom: 24px;
-  scroll-margin-top: 52px;
+  scroll-margin-top: 56px;
 }
 
 .block-header {
@@ -488,7 +492,7 @@ footer {
     flex-direction: column;
   }
 
-  nav {
+  body > nav {
     width: 100%;
     height: auto;
     flex-direction: row;
