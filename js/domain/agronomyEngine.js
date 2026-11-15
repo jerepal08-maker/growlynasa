@@ -1,109 +1,531 @@
-export const CROPS = [
-  { n: 'Trigo', i: '🌾', topt: [12, 22], tmin: 3, tmax: 32, sow: [5, 6, 7], germ: '7–10 días', cycle: 200, water: 'media', kc: 1.1, soil: ['franco', 'arcilloso', 'franco-arenoso'], ph: [6, 7.5], frost: 'tolerante', rad: 'media' },
-  { n: 'Maíz', i: '🌽', topt: [20, 30], tmin: 10, tmax: 35, sow: [9, 10, 11, 12], germ: '5–10 días', cycle: 150, water: 'alta', kc: 1.2, soil: ['franco', 'franco-arenoso'], ph: [5.8, 7], frost: 'sensible', rad: 'alta' },
-  { n: 'Soja', i: '🫘', topt: [20, 30], tmin: 12, tmax: 35, sow: [10, 11, 12], germ: '5–8 días', cycle: 140, water: 'media', kc: 1.1, soil: ['franco', 'arcilloso'], ph: [6, 7], frost: 'sensible', rad: 'alta' },
-  { n: 'Tomate', i: '🍅', topt: [18, 27], tmin: 10, tmax: 35, sow: [8, 9, 10], germ: '6–10 días', cycle: 120, water: 'alta', kc: 1.15, soil: ['franco', 'franco-arenoso'], ph: [6, 6.8], frost: 'sensible', rad: 'alta' },
-  { n: 'Lechuga', i: '🥬', topt: [12, 20], tmin: 4, tmax: 28, sow: [3, 4, 5, 8, 9], germ: '3–7 días', cycle: 70, water: 'media', kc: 1, soil: ['franco', 'franco-arenoso'], ph: [6, 7], frost: 'moderada', rad: 'media' },
-  { n: 'Papa', i: '🥔', topt: [15, 20], tmin: 7, tmax: 28, sow: [8, 9, 10], germ: '15–25 días', cycle: 120, water: 'alta', kc: 1.15, soil: ['franco-arenoso', 'franco'], ph: [5, 6.5], frost: 'sensible', rad: 'media' },
-  { n: 'Girasol', i: '🌻', topt: [20, 28], tmin: 8, tmax: 35, sow: [9, 10, 11, 12], germ: '7–10 días', cycle: 130, water: 'baja', kc: 1.05, soil: ['franco', 'franco-arenoso', 'arcilloso'], ph: [6, 7.5], frost: 'moderada', rad: 'alta' },
-  { n: 'Maní', i: '🥜', topt: [22, 30], tmin: 14, tmax: 35, sow: [10, 11], germ: '7–10 días', cycle: 150, water: 'media', kc: 1.05, soil: ['arenoso', 'franco-arenoso'], ph: [5.9, 7], frost: 'sensible', rad: 'alta' }
-];
+import { CROPS } from './cropDatabase.js';
+export { CROPS };
 
-const FROST_THRESHOLDS = { sensible: 2, moderada: -1, tolerante: -6 };
+const FROST_AIR_LIMITS = { sensible: 2, moderada: -1, tolerante: -6 };
 const WATER_NEEDS_7D = { baja: 15, media: 25, alta: 40 };
-const RADIATION_NEEDS = { baja: 10, media: 14, alta: 18 };
 
-const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
 const clamp = (val) => Math.max(0, Math.min(100, Math.round(val)));
 
-export function buildAgroContext(weather, plot) {
+/**
+ * Devuelve los meses de siembra según el hemisferio de la coordenada seleccionada
+ */
+export function getCropSowMonths(crop, lat) {
+  return Number(lat) >= 0 ? crop.sowNorth : crop.sowSouth;
+}
+
+/**
+ * Construye el contexto ambiental unificado combinando todas las fuentes activas
+ */
+export function buildComprehensiveContext({
+  lat,
+  wx,
+  era5,
+  nasaDaily,
+  topo,
+  profile,
+  ecostress,
+  faoGaez,
+  agroPhysics
+}) {
   return {
-    tmean: avg(weather.daily.map((d) => (d.tmax + d.tmin) / 2)),
-    tmin: Math.min(...weather.daily.map((d) => d.tmin)),
-    tmax: Math.max(...weather.daily.map((d) => d.tmax)),
-    rain7: weather.daily.reduce((acc, d) => acc + d.rain, 0),
-    rad: avg(weather.daily.map((d) => d.radiationSum)),
+    lat: Number(lat),
+    hemisphere: Number(lat) >= 0 ? 'north' : 'south',
     month: new Date().getMonth() + 1,
-    plot
+    wx,
+    era5,
+    nasaDaily,
+    topo,
+    profile,
+    ecostress,
+    faoGaez,
+    agroPhysics
   };
 }
 
-export function evaluateCrop(crop, ctx) {
-  const factors = [];
-  let cap = 100;
+/**
+ * Motor de Recomendación Agrícola Multicriterio Ponderado
+ * Evalúa hasta 16 variables reales/estimadas normalizando dinámicamente los pesos
+ * cuando alguna fuente o dato de terreno no está disponible.
+ */
+export function evaluateCropComprehensive(crop, ctx) {
+  const criteria = [];
+  const advantages = [];
+  const limitingFactors = [];
+  const missingVariables = [];
+  let liebigCap = 100;
 
-  const addFactor = (key, score, message, criticalCap = null) => {
-    factors.push({ k: key, s: score, m: message });
-    if (criticalCap !== null && score <= 20) {
-      cap = Math.min(cap, criticalCap);
+  const registerCriterion = ({ id, pillar, label, weight, score, detail, criticalCap = null }) => {
+    if (score == null) {
+      missingVariables.push(label);
+      return;
+    }
+    const cleanScore = clamp(score);
+    criteria.push({ id, pillar, label, weight, score: cleanScore, detail });
+
+    if (cleanScore >= 75) {
+      advantages.push(`${label}: ${detail}`);
+    } else if (cleanScore < 50) {
+      limitingFactors.push(`${label}: ${detail}`);
+    }
+
+    if (criticalCap != null && cleanScore <= 20) {
+      liebigCap = Math.min(liebigCap, criticalCap);
     }
   };
 
-  const [tLo, tHi] = crop.topt;
-  const tm = ctx.tmean;
-  const tempScore = clamp(tm >= tLo && tm <= tHi ? 100 : 100 - (tm < tLo ? tLo - tm : tm - tHi) * 12);
-  addFactor('Temperatura', tempScore, `Media prevista ${tm.toFixed(1)} °C; óptimo ${tLo}–${tHi} °C.`);
+  // Determinar ventana de meses del ciclo del cultivo según hemisferio
+  const sowMonths = getCropSowMonths(crop, ctx.lat);
+  const startMonth = sowMonths.includes(ctx.month) ? ctx.month : sowMonths[0];
+  const cycleMonthsCount = Math.max(2, Math.round(crop.cycle / 30));
+  const cycleMonths = Array.from({ length: cycleMonthsCount }, (_, i) => ((startMonth - 1 + i) % 12) + 1);
 
-  const frostLimit = FROST_THRESHOLDS[crop.frost];
-  const frostScore = ctx.tmin <= frostLimit ? 0 : ctx.tmin <= frostLimit + 3 ? 50 : 100;
-  addFactor('Heladas', frostScore, `Mínima prevista ${ctx.tmin.toFixed(1)} °C; cultivo ${crop.frost} a heladas.`, 30);
+  const era5Cycle = ctx.era5?.monthlySummary
+    ? ctx.era5.monthlySummary.filter((m) => cycleMonths.includes(m.month))
+    : [];
 
-  const heatScore = ctx.tmax > crop.tmax ? 0 : ctx.tmax > crop.tmax - 3 ? 60 : 100;
-  addFactor('Calor extremo', heatScore, `Máxima prevista ${ctx.tmax.toFixed(1)} °C; tolera hasta ${crop.tmax} °C.`, 40);
+  // =========================================================================
+  // PILAR 1: RÉGIMEN TÉRMICO, HELADAS Y CONGELAMIENTO (Peso base total: 30)
+  // =========================================================================
 
-  const m = ctx.month;
-  const nearSow = crop.sow.some((s) => [1, 11].includes(Math.abs(s - m)));
-  const sowScore = crop.sow.includes(m) ? 100 : nearSow ? 55 : 15;
-  addFactor('Época de siembra', sowScore, `Siembra recomendada en meses ${crop.sow.join(', ')}.`, 50);
+  // 1. Temperatura media durante el ciclo de cultivo (Peso: 12)
+  const cycleTemp = era5Cycle.length
+    ? avg(era5Cycle.map((m) => m.tmeanAvg).filter((v) => v != null))
+    : ctx.wx?.daily?.length
+    ? avg(ctx.wx.daily.map((d) => (d.tmax + d.tmin) / 2))
+    : null;
 
-  const plot = ctx.plot;
-  if (plot && plot.water === 'riego') {
-    addFactor('Agua', 90, 'El terreno cuenta con riego.');
+  if (cycleTemp != null) {
+    const [tLo, tHi] = crop.topt;
+    const tScore =
+      cycleTemp >= tLo && cycleTemp <= tHi
+        ? 100
+        : 100 - (cycleTemp < tLo ? tLo - cycleTemp : cycleTemp - tHi) * 11;
+    const srcTag = era5Cycle.length ? 'climatología ciclo ERA5' : 'pronóstico 7d';
+    registerCriterion({
+      id: 'cycleTemp',
+      pillar: 'Térmico',
+      label: 'Temperatura del ciclo',
+      weight: 12,
+      score: tScore,
+      detail: `${cycleTemp.toFixed(1)} °C (${srcTag}; óptimo ${tLo}–${tHi} °C)`
+    });
   } else {
-    let waterScore = clamp(40 + (ctx.rain7 / WATER_NEEDS_7D[crop.water]) * 60);
-    if (plot && plot.water === 'escasa') {
-      waterScore = clamp(waterScore * 0.5);
-    }
-    addFactor(
-      'Agua',
-      waterScore,
-      `Lluvia prevista 7 días: ${ctx.rain7.toFixed(1)} mm; demanda ${crop.water}${plot ? '' : ' (sin datos del terreno)'}.`
-    );
+    registerCriterion({ label: 'Temperatura del ciclo', score: null });
   }
 
-  const radScore = clamp((ctx.rad / RADIATION_NEEDS[crop.rad]) * 100);
-  addFactor('Radiación', radScore, `Promedio previsto ${ctx.rad.toFixed(1)} MJ/m²/día; necesidad ${crop.rad}.`);
+  // 2. Riesgo de heladas (Pronóstico 7d + frecuencia histórica ERA5 en el ciclo) (Peso: 10)
+  const forecastTmin = ctx.wx?.daily?.length ? Math.min(...ctx.wx.daily.map((d) => d.tmin)) : null;
+  const histFrostDaysCycle = era5Cycle.length
+    ? era5Cycle.reduce((acc, m) => acc + (m.frostDaysAvg || 0), 0)
+    : null;
 
-  if (plot) {
-    addFactor(
-      'Suelo',
-      crop.soil.includes(plot.soil) ? 100 : 55,
-      `Suelo ${plot.soil}; ideal: ${crop.soil.join(', ')}.`
-    );
-    if (plot.ph) {
-      const ph = Number(plot.ph);
-      const diff = ph < crop.ph[0] ? crop.ph[0] - ph : ph > crop.ph[1] ? ph - crop.ph[1] : 0;
-      addFactor('pH', diff === 0 ? 100 : diff <= 0.5 ? 70 : 20, `pH ${ph}; rango ${crop.ph[0]}–${crop.ph[1]}.`, 60);
+  if (forecastTmin != null || histFrostDaysCycle != null) {
+    const airLimit = FROST_AIR_LIMITS[crop.frost];
+    let fScore = 100;
+
+    if (forecastTmin != null) {
+      if (forecastTmin <= airLimit) fScore = 10;
+      else if (forecastTmin <= airLimit + 3) fScore = 50;
     }
+    if (histFrostDaysCycle != null && crop.frost === 'sensible') {
+      if (histFrostDaysCycle > 6) fScore = Math.min(fScore, 15);
+      else if (histFrostDaysCycle > 2) fScore = Math.min(fScore, 55);
+    }
+
+    const histText =
+      histFrostDaysCycle != null ? `; ${histFrostDaysCycle.toFixed(1)} días helada/ciclo en ERA5` : '';
+    registerCriterion({
+      id: 'frost',
+      pillar: 'Térmico',
+      label: 'Riesgo de heladas',
+      weight: 10,
+      score: fScore,
+      detail: `Mín. 7d ${forecastTmin != null ? forecastTmin.toFixed(1) + ' °C' : 's/d'}${histText} (cultivo ${crop.frost})`,
+      criticalCap: crop.frost === 'sensible' ? 30 : 45
+    });
+  } else {
+    registerCriterion({ label: 'Riesgo de heladas', score: null });
   }
 
-  const score = Math.min(Math.round(avg(factors.map((f) => f.s))), cap);
-  const cls =
-    score >= 75
-      ? ['Muy adecuado', 'ok']
-      : score >= 50
-      ? ['Adecuado con condiciones', 'mid']
-      : ['Poco recomendable', 'bad'];
+  // 3. Congelación y descongelamiento (Freeze-Thaw) (Peso: 4)
+  if (ctx.agroPhysics?.freezeThaw?.available) {
+    const ftCycles = ctx.agroPhysics.freezeThaw.annualFreezeThawCycles;
+    let ftScore = 100;
+    if (crop.freezeThawSensitive && ftCycles > 25) ftScore = 35;
+    else if (crop.freezeThawSensitive && ftCycles > 10) ftScore = 65;
+    else if (ftCycles > 35) ftScore = 55;
+
+    registerCriterion({
+      id: 'freezeThaw',
+      pillar: 'Térmico',
+      label: 'Ciclos congelación-deshielo',
+      weight: 4,
+      score: ftScore,
+      detail: `${ftCycles} ciclos/año (riesgo de descalce radicular ${crop.freezeThawSensitive ? 'relevante' : 'bajo'})`
+    });
+  } else {
+    registerCriterion({ label: 'Ciclos congelación-deshielo', score: null });
+  }
+
+  // 4. Estrés térmico y superficie (Calor extremo + NASA POWER TS / ECOSTRESS LST) (Peso: 4)
+  const forecastTmax = ctx.wx?.daily?.length ? Math.max(...ctx.wx.daily.map((d) => d.tmax)) : null;
+  const surfaceTempVal =
+    ctx.ecostress?.available && ctx.ecostress.lstCelsius != null
+      ? ctx.ecostress.lstCelsius
+      : ctx.nasaDaily?.summary?.latestSkinTemp ?? null;
+
+  if (forecastTmax != null || surfaceTempVal != null) {
+    let heatScore = 100;
+    if (forecastTmax != null) {
+      if (forecastTmax > crop.tmax) heatScore = 15;
+      else if (forecastTmax > crop.tmax - 3) heatScore = 60;
+    }
+    if (surfaceTempVal != null && surfaceTempVal > crop.tmax + 5) {
+      heatScore = Math.min(heatScore, 45);
+    }
+    const surfNote = surfaceTempVal != null ? ` · Temp. superficie: ${surfaceTempVal} °C` : '';
+    registerCriterion({
+      id: 'thermalStress',
+      pillar: 'Térmico',
+      label: 'Estrés térmico / superficie',
+      weight: 4,
+      score: heatScore,
+      detail: `Máx. aire 7d ${forecastTmax != null ? forecastTmax.toFixed(1) + ' °C' : 's/d'}${surfNote}`,
+      criticalCap: 40
+    });
+  } else {
+    registerCriterion({ label: 'Estrés térmico / superficie', score: null });
+  }
+
+  // =========================================================================
+  // PILAR 2: RÉGIMEN HÍDRICO Y ESTRÉS EVAPORATIVO (Peso base total: 30)
+  // =========================================================================
+  const waterRegime = ctx.profile?.fields?.waterRegime?.value || null;
+  const hasIrrigation = waterRegime === 'riego';
+
+  // 5. Disponibilidad hídrica estacional y pronóstico (GPM + ERA5 + Open-Meteo) (Peso: 16)
+  const seasonalRainEra5 = era5Cycle.length
+    ? era5Cycle.reduce((acc, m) => acc + (m.rainMonthlyAvg || 0), 0)
+    : null;
+  const annualRainGpm = ctx.nasaDaily?.summary?.annualRainMm ?? null;
+  const rain7d = ctx.wx?.daily?.length ? ctx.wx.daily.reduce((acc, d) => acc + d.rain, 0) : null;
+
+  if (hasIrrigation) {
+    registerCriterion({
+      id: 'waterBalance',
+      pillar: 'Hídrico',
+      label: 'Disponibilidad hídrica',
+      weight: 16,
+      score: 92,
+      detail: 'Terreno con riego suplementario declarado'
+    });
+  } else if (seasonalRainEra5 != null || annualRainGpm != null || rain7d != null) {
+    let wScore = 70;
+    let detailParts = [];
+
+    if (seasonalRainEra5 != null) {
+      const ratio = seasonalRainEra5 / crop.seasonalRainMinMm;
+      wScore = clamp(ratio * 85);
+      detailParts.push(`Lluvia ciclo ERA5: ${Math.round(seasonalRainEra5)} mm (req. ~${crop.seasonalRainMinMm} mm)`);
+    } else if (annualRainGpm != null) {
+      const ratio = annualRainGpm / (crop.seasonalRainMinMm * 1.6);
+      wScore = clamp(ratio * 85);
+      detailParts.push(`Lluvia anual GPM: ${Math.round(annualRainGpm)} mm`);
+    }
+
+    if (rain7d != null) {
+      detailParts.push(`Pronóstico 7d: ${rain7d.toFixed(1)} mm`);
+      if (seasonalRainEra5 == null) {
+        wScore = clamp(40 + (rain7d / WATER_NEEDS_7D[crop.water]) * 60);
+      }
+    }
+
+    if (waterRegime === 'escasa') {
+      wScore = clamp(wScore * 0.55);
+      detailParts.push('Agua escasa declarada');
+    }
+
+    registerCriterion({
+      id: 'waterBalance',
+      pillar: 'Hídrico',
+      label: 'Balance hídrico estacional',
+      weight: 16,
+      score: wScore,
+      detail: detailParts.join(' · '),
+      criticalCap: waterRegime === 'escasa' && crop.water === 'alta' ? 40 : null
+    });
+  } else {
+    registerCriterion({ label: 'Balance hídrico estacional', score: null });
+  }
+
+  // 6. Humedad del suelo actual/radicular (NASA SMAP / Open-Meteo / Usuario) (Peso: 8)
+  const soilMoistPct = ctx.profile?.fields?.soilMoisture?.value ?? null;
+  if (soilMoistPct != null) {
+    let smScore = 85;
+    if (soilMoistPct < 12) smScore = hasIrrigation ? 75 : 30;
+    else if (soilMoistPct < 20) smScore = 65;
+    else if (soilMoistPct > 45 && !crop.soil.includes('arcilloso')) smScore = 55; // Riesgo exceso hídrico
+
+    registerCriterion({
+      id: 'soilMoisture',
+      pillar: 'Hídrico',
+      label: 'Humedad del suelo',
+      weight: 8,
+      score: smScore,
+      detail: `${soilMoistPct}% (${ctx.profile.fields.soilMoisture.sourceLabel})`
+    });
+  } else {
+    registerCriterion({ label: 'Humedad del suelo', score: null });
+  }
+
+  // 7. Humedad ambiental y estrés evaporativo (ECOSTRESS ESI / racha seca GPM) (Peso: 6)
+  const ambientRh = ctx.wx?.current?.rh ?? null;
+  const drySpell = ctx.nasaDaily?.summary?.maxDrySpell90d ?? null;
+  const esi = ctx.ecostress?.available ? ctx.ecostress.esi : null;
+
+  if (ambientRh != null || drySpell != null || esi != null) {
+    let stressScore = 85;
+    const notes = [];
+    if (esi != null) {
+      stressScore = esi <= -1.5 ? 25 : esi <= -0.5 ? 60 : 95;
+      notes.push(`ECOSTRESS ESI: ${esi}`);
+    }
+    if (drySpell != null) {
+      if (drySpell >= 35 && !hasIrrigation && crop.water === 'alta') stressScore = Math.min(stressScore, 40);
+      notes.push(`Racha seca máx 90d: ${drySpell} d`);
+    }
+    if (ambientRh != null) {
+      notes.push(`HR aire: ${Math.round(ambientRh)}%`);
+    }
+    registerCriterion({
+      id: 'hydricStress',
+      pillar: 'Hídrico',
+      label: 'Estrés hídrico y humedad relativa',
+      weight: 6,
+      score: stressScore,
+      detail: notes.join(' · ')
+    });
+  } else {
+    registerCriterion({ label: 'Estrés hídrico y humedad relativa', score: null });
+  }
+
+  // =========================================================================
+  // PILAR 3: CALIDAD EDÁFICA / SUELO (Peso base total: 20)
+  // =========================================================================
+
+  // 8. Textura del suelo (Peso: 8)
+  const texture = ctx.profile?.fields?.soilTexture?.value ?? null;
+  if (texture) {
+    const isIdeal = crop.soil.includes(texture);
+    registerCriterion({
+      id: 'soilTexture',
+      pillar: 'Suelo',
+      label: 'Textura del suelo',
+      weight: 8,
+      score: isIdeal ? 100 : 50,
+      detail: `${texture} (ideal: ${crop.soil.join(', ')})`
+    });
+  } else {
+    registerCriterion({ label: 'Textura del suelo', score: null });
+  }
+
+  // 9. pH del suelo (Peso: 7)
+  const phVal = ctx.profile?.fields?.ph?.value ?? null;
+  if (phVal != null) {
+    const diff = phVal < crop.ph[0] ? crop.ph[0] - phVal : phVal > crop.ph[1] ? phVal - crop.ph[1] : 0;
+    const phScore = diff === 0 ? 100 : diff <= 0.5 ? 70 : diff <= 1.0 ? 40 : 15;
+    registerCriterion({
+      id: 'soilPh',
+      pillar: 'Suelo',
+      label: 'pH del suelo',
+      weight: 7,
+      score: phScore,
+      detail: `pH ${phVal} (rango óptimo ${crop.ph[0]}–${crop.ph[1]})`,
+      criticalCap: 50
+    });
+  } else {
+    registerCriterion({ label: 'pH del suelo', score: null });
+  }
+
+  // 10. Materia orgánica (%) (Peso: 5)
+  const omVal = ctx.profile?.fields?.organicMatter?.value ?? null;
+  if (omVal != null) {
+    const omScore = omVal >= crop.minOmPct ? 100 : clamp((omVal / crop.minOmPct) * 85);
+    registerCriterion({
+      id: 'organicMatter',
+      pillar: 'Suelo',
+      label: 'Materia orgánica',
+      weight: 5,
+      score: omScore,
+      detail: `${omVal}% (referencia recomendada ≥ ${crop.minOmPct}%)`
+    });
+  } else {
+    registerCriterion({ label: 'Materia orgánica', score: null });
+  }
+
+  // =========================================================================
+  // PILAR 4: TOPOGRAFÍA, FOTOPERÍODO, ESTACIONALIDAD Y ROTACIÓN (Peso base: 20)
+  // =========================================================================
+
+  // 11. Época de siembra y duración de ciclo (Hemisferio Norte/Sur) (Peso: 6)
+  const nearSow = sowMonths.some((s) => [1, 11].includes(Math.abs(s - ctx.month)));
+  const sowScore = sowMonths.includes(ctx.month) ? 100 : nearSow ? 65 : 30;
+  registerCriterion({
+    id: 'seasonality',
+    pillar: 'Entorno',
+    label: 'Estacionalidad y ciclo',
+    weight: 6,
+    score: sowScore,
+    detail: `Siembra hemisferio ${ctx.hemisphere === 'north' ? 'norte' : 'sur'}: meses ${sowMonths.join(', ')} (ciclo ${crop.cycle} d)`
+  });
+
+  // 12. Horas de luz y fotoperíodo (Peso: 5)
+  const currentLight = ctx.agroPhysics?.photoperiod?.currentDaylightHours ?? null;
+  if (currentLight != null) {
+    const [dMin, dMax] = crop.daylightRange;
+    const inRange = currentLight >= dMin && currentLight <= dMax;
+    const lightScore = crop.photoperiodType === 'neutral' ? 95 : inRange ? 100 : 55;
+    registerCriterion({
+      id: 'photoperiod',
+      pillar: 'Entorno',
+      label: 'Horas de luz / fotoperíodo',
+      weight: 5,
+      score: lightScore,
+      detail: `${currentLight} h de luz hoy (respuesta: ${crop.photoperiodType}, rango ${dMin}–${dMax} h)`
+    });
+  } else {
+    registerCriterion({ label: 'Horas de luz / fotoperíodo', score: null });
+  }
+
+  // 13. Altitud y pendiente topográfica (NASA SRTM) (Peso: 5)
+  const elev = ctx.topo?.elevationMeters ?? null;
+  const slope = ctx.topo?.slopePercent ?? null;
+  if (elev != null || slope != null) {
+    let topoScore = 100;
+    const topoNotes = [];
+    if (elev != null) {
+      if (elev > crop.maxAltitudeM) topoScore = 15;
+      else if (elev > crop.maxAltitudeM * 0.85) topoScore = 65;
+      topoNotes.push(`Altitud ${elev} m (máx. ${crop.maxAltitudeM} m)`);
+    }
+    if (slope != null) {
+      if (slope > crop.maxSlopePct * 1.8) topoScore = Math.min(topoScore, 15);
+      else if (slope > crop.maxSlopePct) topoScore = Math.min(topoScore, 55);
+      topoNotes.push(`Pendiente ${slope}%`);
+    }
+    registerCriterion({
+      id: 'topography',
+      pillar: 'Entorno',
+      label: 'Altitud y pendiente (SRTM)',
+      weight: 5,
+      score: topoScore,
+      detail: topoNotes.join(' · '),
+      criticalCap: 35
+    });
+  } else {
+    registerCriterion({ label: 'Altitud y pendiente (SRTM)', score: null });
+  }
+
+  // 14. Antecedentes de cultivos / Rotación (Usuario o USDA CropScape) + FAO GAEZ (Peso: 4)
+  const prevCropText = ctx.profile?.fields?.previousCrop?.value ?? null;
+  const gaezCropScore = ctx.faoGaez?.available ? ctx.faoGaez.suitabilityByCrop?.[crop.id] : null;
+
+  if (prevCropText || gaezCropScore != null) {
+    let rotScore = 75;
+    const rotNotes = [];
+    if (prevCropText) {
+      const rotEval = evaluateRotationCompatibility(crop, prevCropText);
+      rotScore = rotEval.score;
+      rotNotes.push(rotEval.note);
+    }
+    if (gaezCropScore != null) {
+      rotScore = Math.round((rotScore + gaezCropScore) / 2);
+      rotNotes.push(`FAO GAEZ: ${gaezCropScore}/100`);
+    }
+    registerCriterion({
+      id: 'rotationGaez',
+      pillar: 'Entorno',
+      label: 'Rotación y aptitud agroecológica',
+      weight: 4,
+      score: rotScore,
+      detail: rotNotes.join(' · ')
+    });
+  } else {
+    registerCriterion({ label: 'Rotación y aptitud agroecológica', score: null });
+  }
+
+  // =========================================================================
+  // CÁLCULO FINAL PONDERADO CON NORMALIZACIÓN POR DATOS DISPONIBLES
+  // =========================================================================
+  const totalAvailableWeight = criteria.reduce((acc, c) => acc + c.weight, 0);
+  const weightedSum = criteria.reduce((acc, c) => acc + c.score * c.weight, 0);
+  const rawWeightedScore = totalAvailableWeight > 0 ? Math.round(weightedSum / totalAvailableWeight) : 0;
+  const finalScore = Math.min(rawWeightedScore, liebigCap);
+
+  // Clasificación en 4 categorías diferenciadas
+  let classification;
+  if (finalScore >= 75) {
+    classification = { label: 'Condiciones favorables', badge: 'ok' };
+  } else if (finalScore >= 55) {
+    classification = { label: 'Condiciones moderadamente favorables', badge: 'mid' };
+  } else if (finalScore >= 35) {
+    classification = { label: 'Condiciones limitantes', badge: 'warn-orange' };
+  } else {
+    classification = { label: 'Condiciones desfavorables', badge: 'bad' };
+  }
 
   return {
-    score,
-    f: factors,
-    capped: cap < 100 && score === cap,
-    cls
+    score: finalScore,
+    rawWeightedScore,
+    cappedByLiebig: liebigCap < 100 && finalScore === liebigCap,
+    classification,
+    criteria,
+    advantages,
+    limitingFactors,
+    missingVariables,
+    weightCoveragePct: Math.round((totalAvailableWeight / 100) * 100)
   };
 }
 
-export function generateAlerts(weather) {
+function evaluateRotationCompatibility(candidateCrop, prevText) {
+  const norm = prevText.toLowerCase();
+  const sameCropAliases = {
+    wheat: ['trigo', 'wheat'],
+    corn: ['maiz', 'maíz', 'corn'],
+    soybean: ['soja', 'soy'],
+    tomato: ['tomate', 'tomato'],
+    lettuce: ['lechuga', 'lettuce'],
+    potato: ['papa', 'patata', 'potato'],
+    sunflower: ['girasol', 'sunflower'],
+    peanut: ['mani', 'maní', 'peanut']
+  };
+
+  const aliases = sameCropAliases[candidateCrop.id] || [candidateCrop.n.toLowerCase()];
+  if (aliases.some((a) => norm.includes(a))) {
+    return {
+      score: 35,
+      note: `Monocultivo detectado (${prevText}): mayor riesgo de enfermedades de rastrojo`
+    };
+  }
+
+  const prevIsLegume = ['soja', 'soy', 'mani', 'maní', 'peanut', 'alfalfa', 'poroto'].some((l) =>
+    norm.includes(l)
+  );
+  if (prevIsLegume && candidateCrop.family === 'Poaceae') {
+    return {
+      score: 100,
+      note: `Rotación ideal tras leguminosa (${prevText}): aporte biológico de nitrógeno`
+    };
+  }
+
+  return {
+    score: 80,
+    note: `Rotación diversificada respecto a ${prevText}`
+  };
+}
+
+export function generateAlerts(weather, agroPhysics = null) {
   const alerts = [];
   const d = weather.daily;
   const c = weather.current;
@@ -117,9 +539,9 @@ export function generateAlerts(weather) {
   const maxWind = Math.max(...d.map((z) => z.windMax));
 
   if (minTemp <= 0) {
-    pushAlert('hi', 'Helada', `Mínima prevista de ${minTemp.toFixed(1)} °C en los próximos 7 días.`);
+    pushAlert('hi', 'Helada meteorológica', `Mínima prevista de ${minTemp.toFixed(1)} °C en aire (2m) en los próximos 7 días.`);
   } else if (minTemp <= 3) {
-    pushAlert('me', 'Riesgo de helada', `Mínima prevista de ${minTemp.toFixed(1)} °C.`);
+    pushAlert('me', 'Riesgo de helada agronómica', `Mínima en aire de ${minTemp.toFixed(1)} °C; la superficie del suelo puede bajar de 0 °C.`);
   }
 
   if (maxTemp >= 35) {
@@ -140,6 +562,14 @@ export function generateAlerts(weather) {
 
   if (c.rh >= 85 && c.temp >= 15 && c.temp <= 25) {
     pushAlert('me', 'Condiciones favorables a enfermedades fúngicas', `Humedad ${c.rh}% y ${c.temp} °C (indicador orientativo).`);
+  }
+
+  if (agroPhysics?.freezeThaw?.available && agroPhysics.freezeThaw.annualFreezeThawCycles >= 25) {
+    pushAlert(
+      'me',
+      'Ciclos frecuentes de congelación-descongelación',
+      `Promedio histórico de ${agroPhysics.freezeThaw.annualFreezeThawCycles} ciclos/año: precaución por descalce radicular en invierno.`
+    );
   }
 
   return alerts.length
